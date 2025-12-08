@@ -1,36 +1,146 @@
 {
+  "date": "2025-12-08",
+  "lastUpdated": 1765185840167,
   "activities": [
     {
-      "id": "a0ea2c06-e56b-485a-a4c9-ecb99164d2d0",
-      "groupId": "cd3916ce-fa35-4ad1-8bfd-e19f84efad0d",
-      "categoryId": "work",
-      "startTime": "2025-12-08T16:03:07.460252",
-      "endTime": "2025-12-08T16:03:14.565951",
-      "duration": 7,
-      "note": "6565",
+      "id": "ba3c0bd8-ac98-4b2d-9816-cda1eaab1d30",
+      "groupId": "e45943f1-b674-4eaa-b3a7-c392bc163365",
+      "categoryId": "nap",
+      "startTime": "2025-12-08T17:05:00.000",
+      "endTime": "2025-12-08T17:06:00.000",
+      "duration": 60,
+      "note": "fjkajsl",
       "isCrossDaySplit": false
     },
     {
-      "id": "60e12f61-0620-4e05-8380-2d0be2d15722",
-      "groupId": "446d78b9-7a1c-4644-bf6a-c43ff4354e05",
-      "categoryId": "study",
-      "startTime": "2025-12-08T16:03:16.905934",
-      "endTime": "2025-12-08T16:03:35.679285",
-      "duration": 18,
-      "note": "6565",
+      "id": "426865ec-1479-4ff3-a968-bf8f98431941",
+      "groupId": "159e9a45-c31d-432a-a45d-0ae1cd1a0ae8",
+      "categoryId": "meal",
+      "startTime": "2025-12-08T17:06:00.000",
+      "endTime": "2025-12-08T17:06:50.096415",
+      "duration": 50,
+      "note": "午睡",
       "isCrossDaySplit": false
     },
     {
-      "id": "c9a00bb3-e70b-4feb-872b-a6fd3d58c072",
-      "groupId": "7a333b0f-7d9f-4e74-a54b-5c270e554c02",
-      "categoryId": "life",
-      "startTime": "2025-12-08T16:03:37.230128",
-      "endTime": "2025-12-08T16:03:44.698201",
+      "id": "32a65127-50f8-4140-9af6-d505389195fb",
+      "groupId": "3b693fe1-fedf-4f5d-ada8-4319983c4d2a",
+      "categoryId": "game",
+      "startTime": "2025-12-08T17:06:11.767530",
+      "endTime": "2025-12-08T17:06:20.185576",
+      "duration": 8,
+      "note": "午睡",
+      "isCrossDaySplit": false
+    },
+    {
+      "id": "482025f5-baba-442a-a9de-d90331a4f35a",
+      "groupId": "91d24806-7056-4ef7-afc3-0491c907a13a",
+      "categoryId": "web",
+      "startTime": "2025-12-08T17:06:20.194276",
+      "endTime": "2025-12-08T17:06:28.126325",
       "duration": 7,
-      "note": "6565",
+      "note": "午睡",
+      "isCrossDaySplit": false
+    },
+    {
+      "id": "6aedabcc-8173-4650-a018-ad13a800be12",
+      "groupId": "d40a1723-13f9-4504-b4af-5dce751cb1f7",
+      "categoryId": "video",
+      "startTime": "2025-12-08T17:06:50.099611",
+      "endTime": "2025-12-08T17:07:15.530854",
+      "duration": 25,
+      "note": "午睡",
+      "isCrossDaySplit": false
+    },
+    {
+      "id": "775a2472-0726-4190-ab05-e703795df08c",
+      "groupId": "84df57fa-ed81-48c7-8582-c7b5346dab5a",
+      "categoryId": "web",
+      "startTime": "2025-12-08T17:07:38.080908",
+      "endTime": "2025-12-08T17:08:01.019502",
+      "duration": 22,
+      "note": "写代码",
+      "isCrossDaySplit": false
+    },
+    {
+      "id": "a655e3af-10d1-4771-9d56-41f1c316ae6e",
+      "groupId": "b0332f8d-efce-414a-991c-ad120f18edf3",
+      "categoryId": "sleep",
+      "startTime": "2025-12-08T17:08:01.024014",
+      "endTime": "2025-12-08T17:09:26.182350",
+      "duration": 85,
+      "note": "写代码",
+      "isCrossDaySplit": false
+    },
+    {
+      "id": "1333ab18-a830-4ebd-8811-2edc4234fc31",
+      "groupId": "717b00af-07e9-4455-90dd-4136792ea2f1",
+      "categoryId": "sports",
+      "startTime": "2025-12-08T17:09:26.187063",
+      "endTime": "2025-12-08T17:09:38.315155",
+      "duration": 12,
+      "note": "写代码",
+      "isCrossDaySplit": false
+    },
+    {
+      "id": "e1970923-6231-4e4b-b177-09de8d6c7e05",
+      "groupId": "0104d4d6-5eb8-4cdb-a6c2-3e7b6f5d04b9",
+      "categoryId": "web",
+      "startTime": "2025-12-08T17:10:55.820913",
+      "endTime": "2025-12-08T17:11:06.921656",
+      "duration": 11,
+      "note": "上网探索",
+      "isCrossDaySplit": false
+    },
+    {
+      "id": "39a86662-443c-4322-8468-f0661418ca0d",
+      "groupId": "e78f3582-f03b-43a6-9895-7f3bc726c637",
+      "categoryId": "reading",
+      "startTime": "2025-12-08T17:11:10.138302",
+      "endTime": "2025-12-08T17:12:00.765729",
+      "duration": 50,
+      "note": "上网探索",
+      "isCrossDaySplit": false
+    },
+    {
+      "id": "fb607725-dd9d-42b5-8d8f-794fd64ded1d",
+      "groupId": "150c291c-0a11-4d5a-99b6-edb85cb0a232",
+      "categoryId": "nap",
+      "startTime": "2025-12-08T17:22:37.060143",
+      "endTime": "2025-12-08T17:22:41.504471",
+      "duration": 4,
+      "note": "午睡",
+      "isCrossDaySplit": false
+    },
+    {
+      "id": "edfb96a8-08a6-4241-a095-faae827aad48",
+      "groupId": "3fd345ae-86f7-45d0-8724-802f725aa14f",
+      "categoryId": "video",
+      "startTime": "2025-12-08T17:22:44.020655",
+      "endTime": "2025-12-08T17:22:53.515167",
+      "duration": 9,
+      "note": "午睡",
+      "isCrossDaySplit": false
+    },
+    {
+      "id": "0c915dda-9fcd-461e-bf3d-b558e07eabb3",
+      "groupId": "e661e4f8-37a2-478c-a76b-307c97a7a041",
+      "categoryId": "nap",
+      "startTime": "2025-12-08T17:22:56.658820",
+      "endTime": "2025-12-08T17:23:03.078158",
+      "duration": 6,
+      "note": "午睡",
+      "isCrossDaySplit": false
+    },
+    {
+      "id": "6557e1ef-df61-47ca-a435-0cc037bf4505",
+      "groupId": "e661e4f8-37a2-478c-a76b-307c97a7a041",
+      "categoryId": "nap",
+      "startTime": "2025-12-08T17:23:07.329254",
+      "endTime": "2025-12-08T17:23:46.567194",
+      "duration": 39,
+      "note": "午睡",
       "isCrossDaySplit": false
     }
-  ],
-  "date": "2025-12-08",
-  "lastUpdated": 1765181024699
+  ]
 }

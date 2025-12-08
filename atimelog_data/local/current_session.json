@@ -1,25 +1,6 @@
 {
   "deviceId": "demo-device",
-  "lastUpdated": 1765181024698,
+  "lastUpdated": 1765185828343,
   "current": null,
-  "recentContexts": [
-    {
-      "groupId": "7a333b0f-7d9f-4e74-a54b-5c270e554c02",
-      "categoryId": "life",
-      "note": "6565",
-      "lastActiveTime": 1765181024699
-    },
-    {
-      "groupId": "446d78b9-7a1c-4644-bf6a-c43ff4354e05",
-      "categoryId": "study",
-      "note": "6565",
-      "lastActiveTime": 1765181015681
-    },
-    {
-      "groupId": "cd3916ce-fa35-4ad1-8bfd-e19f84efad0d",
-      "categoryId": "work",
-      "note": "6565",
-      "lastActiveTime": 1765180994581
-    }
-  ]
+  "recentContexts": []
 }
