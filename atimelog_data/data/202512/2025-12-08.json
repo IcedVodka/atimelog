@@ -1,0 +1,36 @@
+{
+  "activities": [
+    {
+      "id": "a0ea2c06-e56b-485a-a4c9-ecb99164d2d0",
+      "groupId": "cd3916ce-fa35-4ad1-8bfd-e19f84efad0d",
+      "categoryId": "work",
+      "startTime": "2025-12-08T16:03:07.460252",
+      "endTime": "2025-12-08T16:03:14.565951",
+      "duration": 7,
+      "note": "6565",
+      "isCrossDaySplit": false
+    },
+    {
+      "id": "60e12f61-0620-4e05-8380-2d0be2d15722",
+      "groupId": "446d78b9-7a1c-4644-bf6a-c43ff4354e05",
+      "categoryId": "study",
+      "startTime": "2025-12-08T16:03:16.905934",
+      "endTime": "2025-12-08T16:03:35.679285",
+      "duration": 18,
+      "note": "6565",
+      "isCrossDaySplit": false
+    },
+    {
+      "id": "c9a00bb3-e70b-4feb-872b-a6fd3d58c072",
+      "groupId": "7a333b0f-7d9f-4e74-a54b-5c270e554c02",
+      "categoryId": "life",
+      "startTime": "2025-12-08T16:03:37.230128",
+      "endTime": "2025-12-08T16:03:44.698201",
+      "duration": 7,
+      "note": "6565",
+      "isCrossDaySplit": false
+    }
+  ],
+  "date": "2025-12-08",
+  "lastUpdated": 1765181024699
+}
