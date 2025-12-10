@@ -27,7 +27,8 @@ class TimeTrackingController extends ChangeNotifier {
   bool get isRunning => _session.current != null;
   CurrentActivity? get currentActivity => _session.current;
   List<RecentContext> get recentContexts => List.unmodifiable(_session.recentContexts);
-  List<CategoryModel> get categories => List.unmodifiable(_categories);
+  List<CategoryModel> get categories => List.unmodifiable(_categories.where((element) => !element.deleted));
+  List<CategoryModel> get allCategories => List.unmodifiable(_categories);
   AppSettings get settings => _settings;
 
   Duration get currentDuration {
@@ -58,6 +59,20 @@ class TimeTrackingController extends ChangeNotifier {
       }
     }
     return null;
+  }
+
+  CategoryModel _requireActiveCategory(String id) {
+    final category = findCategory(id);
+    if (category == null) {
+      throw StateError('分类不存在或已被删除');
+    }
+    if (category.deleted) {
+      throw StateError('该分类已删除，请先在分类管理中恢复');
+    }
+    if (!category.enabled) {
+      throw StateError('该分类已停用，请先启用');
+    }
+    return category;
   }
 
   Future<void> setCategories(List<CategoryModel> categories) async {
@@ -91,8 +106,29 @@ class TimeTrackingController extends ChangeNotifier {
     if (index == -1) {
       return;
     }
+    if (_categories[index].deleted) {
+      return;
+    }
     final updated = [..._categories];
     updated[index] = updated[index].copyWith(enabled: enabled);
+    await setCategories(updated);
+  }
+
+  Future<void> setCategoryDeletion(String id, bool deleted) async {
+    final index = _categories.indexWhere((element) => element.id == id);
+    if (index == -1) {
+      return;
+    }
+    final updated = [..._categories];
+    updated[index] = updated[index].copyWith(
+      deleted: deleted,
+      enabled: deleted ? false : updated[index].enabled,
+    );
+    await setCategories(updated);
+  }
+
+  Future<void> removeCategory(String id) async {
+    final updated = _categories.where((element) => element.id != id).toList();
     await setCategories(updated);
   }
 
@@ -101,6 +137,7 @@ class TimeTrackingController extends ChangeNotifier {
     required String note,
     bool allowSwitch = false,
   }) async {
+    _requireActiveCategory(categoryId);
     if (_session.current != null && !allowSwitch) {
       throw StateError('当前已在计时，请先停止或暂停');
     }
@@ -122,6 +159,7 @@ class TimeTrackingController extends ChangeNotifier {
   }
 
   Future<void> resumeFromContext(RecentContext context) async {
+    _requireActiveCategory(context.categoryId);
     if (_session.current != null) {
       await stopCurrentActivity(pushToRecent: true);
     }
@@ -236,6 +274,7 @@ class TimeTrackingController extends ChangeNotifier {
     required DateTime startTime,
     required DateTime endTime,
   }) async {
+    _requireActiveCategory(categoryId);
     if (!startTime.isBefore(endTime)) {
       throw StateError('结束时间必须晚于开始时间');
     }

@@ -729,6 +729,7 @@ class _ActivityTabState extends State<ActivityTab> {
 
         return SafeArea(
           child: ListView(
+            primary: false,
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
             children: [
               _buildActiveCard(activity),
@@ -929,6 +930,11 @@ class _ActivityTabState extends State<ActivityTab> {
         const SizedBox(height: 8),
         ...recents.map((item) {
           final category = widget.controller.findCategory(item.categoryId);
+          final isDeleted = category?.deleted ?? false;
+          final isEnabled = category?.enabled ?? false;
+          final statusLabel = isDeleted
+              ? '（分类已删除）'
+              : (!isEnabled ? '（已停用）' : '');
           final durationText = _formatDuration(Duration(seconds: item.accumulatedSeconds));
           return Card(
             child: Padding(
@@ -947,16 +953,18 @@ class _ActivityTabState extends State<ActivityTab> {
                         Text(item.note, style: const TextStyle(fontWeight: FontWeight.w600)),
                         const SizedBox(height: 4),
                         Text(
-                          '${category?.name ?? item.categoryId} · 已记录 $durationText · ${_formatLastActive(item.lastActiveTime)}',
+                          '${category?.name ?? item.categoryId}$statusLabel · 已记录 $durationText · ${_formatLastActive(item.lastActiveTime)}',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
                     ),
                   ),
                   IconButton(
-                    onPressed: () => _handleResume(item),
+                    onPressed: isDeleted || !isEnabled ? null : () => _handleResume(item),
                     icon: const Icon(Icons.play_circle, color: Colors.green),
-                    tooltip: '继续',
+                    tooltip: isDeleted
+                        ? '分类已删除，无法继续'
+                        : (!isEnabled ? '分类已停用，无法继续' : '继续'),
                   ),
                   IconButton(
                     onPressed: () => _editRecentContext(item),
@@ -988,6 +996,7 @@ class _ActivityTabState extends State<ActivityTab> {
             final width = constraints.maxWidth;
             final crossAxisCount = max(5, min(8, (width / 90).floor()));
             return GridView.builder(
+              primary: false,
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -999,9 +1008,10 @@ class _ActivityTabState extends State<ActivityTab> {
               itemCount: categories.length,
               itemBuilder: (context, index) {
                 final category = categories[index];
+                final name = category.name.trim();
                 final groupName = category.group.isNotEmpty
                     ? category.group
-                    : (category.name.contains('.') ? category.name.split('.').first : '');
+                    : (name.contains('.') ? name.split('.').first.trim() : name);
                 return InkWell(
                   borderRadius: BorderRadius.circular(12),
                   onTap: () async {
@@ -1353,6 +1363,7 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
               }
               final days = dayGroups.keys.toList()..sort((a, b) => b.compareTo(a));
               return ListView.builder(
+                primary: false,
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
                 itemCount: days.length,
                 itemBuilder: (context, index) {
@@ -1867,7 +1878,7 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('删除记录'),
-        content: const Text('确认删除该片段？历史数据不会被同步删除。'),
+        content: const Text('确认删除该片段？删除后历史数据将被移除且不可恢复。'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
           FilledButton(
@@ -2055,7 +2066,7 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
   }
 
   Color _groupColor(String groupLabel) {
-    for (final cat in widget.controller.categories) {
+    for (final cat in widget.controller.allCategories) {
       if (_groupLabel(cat) == groupLabel) {
         return cat.color;
       }
@@ -2070,13 +2081,13 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
 
   String _groupLabel(CategoryModel? category) {
     if (category == null) return '其他';
-    if (category.name.contains('.')) {
-      return category.name.split('.').first;
-    }
     if (category.group.trim().isNotEmpty) {
       return category.group.trim();
     }
-    return category.name;
+    if (category.name.contains('.')) {
+      return category.name.split('.').first;
+    }
+    return category.name.trim();
   }
 
   List<_TimelineGroupDisplay> _mergeByGroupLabel(List<_TimelineGroupDisplay> items) {
@@ -2209,7 +2220,6 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     Icons.cake_outlined,
   ];
   int? _draggingIndex;
-
   List<IconData> _buildIconOptions(IconData current) {
     final seen = <String>{};
     final result = <IconData>[];
@@ -2229,11 +2239,15 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
   }
 
   String _deriveGroupFromName(String name) {
-    final parts = name.split('.');
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      return '';
+    }
+    final parts = trimmed.split('.');
     if (parts.length >= 2 && parts.first.trim().isNotEmpty) {
       return parts.first.trim();
     }
-    return '';
+    return trimmed;
   }
 
   @override
@@ -2241,7 +2255,7 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     return AnimatedBuilder(
       animation: widget.controller,
       builder: (context, _) {
-        final categories = [...widget.controller.categories]..sort((a, b) => a.order.compareTo(b.order));
+        final categories = [...widget.controller.allCategories]..sort((a, b) => a.order.compareTo(b.order));
         return SafeArea(
           child: Column(
             children: [
@@ -2260,60 +2274,34 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                 ),
               ),
               Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    const crossAxisCount = 2;
-                    const spacing = 12.0;
-                    final tileWidth = (constraints.maxWidth - spacing * (crossAxisCount + 1)) / crossAxisCount;
-                    final aspectRatio = tileWidth / 150;
-                    return GridView.builder(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: crossAxisCount,
-                        crossAxisSpacing: spacing,
-                        mainAxisSpacing: spacing,
-                        childAspectRatio: aspectRatio,
+                child: ReorderableListView.builder(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
+                  buildDefaultDragHandles: false,
+                  itemCount: categories.length,
+                  onReorder: (oldIndex, newIndex) async {
+                    if (newIndex > oldIndex) {
+                      newIndex -= 1;
+                    }
+                    final updated = [...categories];
+                    final item = updated.removeAt(oldIndex);
+                    updated.insert(newIndex, item);
+                    await widget.controller.reorderCategories(updated);
+                    setState(() {});
+                  },
+                  itemBuilder: (context, index) {
+                    final cat = categories[index];
+                    final groupLabel = _deriveGroupFromName(cat.name);
+                    return Container(
+                      key: ValueKey(cat.id),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      child: _categoryCard(
+                        cat,
+                        groupLabel: groupLabel,
+                        dragHandle: ReorderableDragStartListener(
+                          index: index,
+                          child: const Icon(Icons.drag_handle),
+                        ),
                       ),
-                      itemCount: categories.length,
-                      itemBuilder: (context, index) {
-                        final cat = categories[index];
-                        final groupLabel = _deriveGroupFromName(cat.name);
-                        return LongPressDraggable<int>(
-                          data: index,
-                          onDragStarted: () => setState(() => _draggingIndex = index),
-                          onDraggableCanceled: (_, __) => setState(() => _draggingIndex = null),
-                          onDragEnd: (_) => setState(() => _draggingIndex = null),
-                          feedback: Material(
-                            color: Colors.transparent,
-                            child: SizedBox(
-                              width: tileWidth,
-                              child: _categoryCard(cat, groupLabel: groupLabel, highlight: true),
-                            ),
-                          ),
-                          childWhenDragging: Opacity(
-                            opacity: 0.35,
-                            child: _categoryCard(cat, groupLabel: groupLabel),
-                          ),
-                          child: DragTarget<int>(
-                            onWillAccept: (from) => from != null && from != index,
-                            onAccept: (from) async {
-                              final updated = [...categories];
-                              var insertIndex = index;
-                              if (from < insertIndex) {
-                                insertIndex -= 1;
-                              }
-                              final item = updated.removeAt(from);
-                              updated.insert(insertIndex, item);
-                              await widget.controller.reorderCategories(updated);
-                              setState(() => _draggingIndex = null);
-                            },
-                            builder: (context, candidate, rejected) {
-                              final highlight = candidate.isNotEmpty || _draggingIndex == index;
-                              return _categoryCard(cat, groupLabel: groupLabel, highlight: highlight);
-                            },
-                          ),
-                        );
-                      },
                     );
                   },
                 ),
@@ -2325,18 +2313,20 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     );
   }
 
-  Widget _categoryCard(CategoryModel cat, {required String groupLabel, bool highlight = false}) {
-    final resolvedGroup = groupLabel.isEmpty ? '未分组' : groupLabel;
+  Widget _categoryCard(CategoryModel cat, {required String groupLabel, Widget? dragHandle}) {
+    final resolvedGroup = groupLabel.isEmpty ? cat.name : groupLabel;
     final theme = Theme.of(context);
+    final isDeleted = cat.deleted;
     return Card(
-      elevation: highlight ? 3 : 1,
+      elevation: 1,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: cat.color.withOpacity(highlight ? 0.45 : 0.25)),
+        side: BorderSide(color: cat.color.withOpacity(0.25)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
@@ -2353,6 +2343,19 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                     children: [
                       Text(cat.name, style: const TextStyle(fontWeight: FontWeight.w700)),
                       const SizedBox(height: 2),
+                      if (isDeleted)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '已删除（仅配置文件）',
+                            style: theme.textTheme.labelSmall?.copyWith(color: Colors.redAccent),
+                          ),
+                        ),
                       Text(
                         resolvedGroup,
                         style: theme.textTheme.bodySmall,
@@ -2363,13 +2366,15 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                 ),
                 Switch(
                   value: cat.enabled,
-                  onChanged: (val) => widget.controller.toggleCategory(cat.id, val),
+                  onChanged: isDeleted ? null : (val) => widget.controller.toggleCategory(cat.id, val),
                 ),
               ],
             ),
-            const Spacer(),
+            const SizedBox(height: 10),
             Row(
               children: [
+                if (dragHandle != null) dragHandle,
+                const SizedBox(width: 6),
                 Text('顺序 ${cat.order}', style: theme.textTheme.bodySmall),
                 const Spacer(),
                 IconButton(
@@ -2378,9 +2383,9 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                   onPressed: () => _showCategoryEditor(existing: cat),
                 ),
                 IconButton(
-                  tooltip: '停用',
-                  icon: const Icon(Icons.archive_outlined),
-                  onPressed: () => widget.controller.toggleCategory(cat.id, false),
+                  tooltip: '删除（从配置移除，不影响历史数据）',
+                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                  onPressed: () => _deleteCategory(cat),
                 ),
               ],
             ),
@@ -2423,7 +2428,7 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      '当前群组: ${derivedGroup.isEmpty ? '未分组' : derivedGroup}',
+                      '当前群组: ${derivedGroup.isEmpty ? '填写名称后自动生成' : derivedGroup}',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
@@ -2503,7 +2508,7 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
       name: name,
       iconCode: icon.codePoint,
       colorHex: colorToHex(color),
-      order: existing?.order ?? widget.controller.categories.length,
+      order: existing?.order ?? widget.controller.allCategories.length,
       enabled: enabled,
       group: parsedGroup,
     );
@@ -2512,7 +2517,7 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
 
   String _buildCategoryId(String name) {
     final base = name.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '_');
-    final exists = widget.controller.categories.any((element) => element.id == base);
+    final exists = widget.controller.allCategories.any((element) => element.id == base);
     if (!exists) {
       return base;
     }
@@ -2522,6 +2527,30 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
   void _showSnack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _deleteCategory(CategoryModel cat) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除分类'),
+        content: const Text('将从 categories.json 中移除该分类，历史数据不受影响。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      return;
+    }
+    await widget.controller.removeCategory(cat.id);
+    if (!mounted) return;
+    _showSnack('已删除 ${cat.name}');
   }
 }
 
@@ -2540,6 +2569,7 @@ class _SettingsTabState extends State<SettingsTab> {
     final settings = widget.controller.settings;
     return SafeArea(
       child: ListView(
+        primary: false,
         padding: const EdgeInsets.all(16),
         children: [
           SwitchListTile(

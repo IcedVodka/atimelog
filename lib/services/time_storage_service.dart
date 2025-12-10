@@ -192,13 +192,13 @@ class TimeStorageService {
   Future<List<CategoryModel>> loadCategories() async {
     final file = await _categoriesFile();
     if (!await file.exists() || (await file.length()) == 0) {
-      final defaults = _defaultCategories();
+      final defaults = _defaultCategories().map(_normalizeCategory).toList();
       await saveCategories(defaults);
       return defaults;
     }
     final content = await file.readAsString();
     if (content.trim().isEmpty) {
-      final defaults = _defaultCategories();
+      final defaults = _defaultCategories().map(_normalizeCategory).toList();
       await saveCategories(defaults);
       return defaults;
     }
@@ -217,7 +217,7 @@ class TimeStorageService {
         .map(_normalizeCategory)
         .toList();
     if (list.isEmpty) {
-      final defaults = _defaultCategories();
+      final defaults = _defaultCategories().map(_normalizeCategory).toList();
       await saveCategories(defaults);
       return defaults;
     }
@@ -227,7 +227,8 @@ class TimeStorageService {
 
   Future<void> saveCategories(List<CategoryModel> categories) async {
     final file = await _categoriesFile();
-    final payload = [...categories]..sort((a, b) => a.order.compareTo(b.order));
+    final normalized = categories.map(_normalizeCategory).toList();
+    final payload = [...normalized]..sort((a, b) => a.order.compareTo(b.order));
     await file.writeAsString(prettyJson({
       'lastUpdated': DateTime.now().millisecondsSinceEpoch,
       'items': payload.map((e) => e.toJson()).toList(),
@@ -262,19 +263,20 @@ class TimeStorageService {
   }
 
   CategoryModel _normalizeCategory(CategoryModel category) {
+    CategoryModel normalized = category;
     if (category.id == 'nap' && category.name == '午睡') {
-      return category.copyWith(name: '睡眠.午睡', group: '睡眠');
+      normalized = category.copyWith(name: '睡眠.午睡', group: '睡眠');
     }
     if (category.id == 'web' && category.name == '上网探索') {
-      return category.copyWith(name: '上网探究');
+      normalized = category.copyWith(name: '上网探究');
     }
-    if (category.name.contains('.')) {
-      final derivedGroup = category.name.split('.').first.trim();
-      if (derivedGroup.isNotEmpty && category.group != derivedGroup) {
-        return category.copyWith(group: derivedGroup);
-      }
+    final name = normalized.name.trim();
+    final hasDot = name.contains('.');
+    final derivedGroup = hasDot ? name.split('.').first.trim() : name;
+    if (derivedGroup.isNotEmpty && normalized.group != derivedGroup) {
+      normalized = normalized.copyWith(group: derivedGroup);
     }
-    return category;
+    return normalized;
   }
 
   List<CategoryModel> _defaultCategories() {

@@ -249,6 +249,7 @@ class CategoryModel {
     required this.colorHex,
     required this.order,
     this.enabled = true,
+    this.deleted = false,
     this.group = '',
   });
 
@@ -258,6 +259,7 @@ class CategoryModel {
   final String colorHex;
   final int order;
   final bool enabled;
+  final bool deleted;
   final String group;
 
   IconData get iconData => IconData(iconCode, fontFamily: 'MaterialIcons');
@@ -269,6 +271,7 @@ class CategoryModel {
     String? colorHex,
     int? order,
     bool? enabled,
+    bool? deleted,
     String? group,
   }) {
     return CategoryModel(
@@ -278,6 +281,7 @@ class CategoryModel {
       colorHex: colorHex ?? this.colorHex,
       order: order ?? this.order,
       enabled: enabled ?? this.enabled,
+      deleted: deleted ?? this.deleted,
       group: group ?? this.group,
     );
   }
@@ -302,6 +306,7 @@ class CategoryModel {
       colorHex: json['colorHex'] as String? ?? '#2196F3',
       order: json['order'] as int? ?? 0,
       enabled: json['enabled'] as bool? ?? true,
+      deleted: json['deleted'] as bool? ?? false,
       group: json['group'] as String? ?? '',
     );
   }
