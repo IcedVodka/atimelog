@@ -1,14 +1,18 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
 import 'models/time_models.dart';
 import 'services/time_storage_service.dart';
 import 'services/time_tracking_controller.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('zh_CN', null);
+  Intl.defaultLocale = 'zh_CN';
   runApp(MyApp(controller: TimeTrackingController(TimeStorageService())));
 }
 
@@ -251,6 +255,7 @@ class _ActivityTabState extends State<ActivityTab> {
   String? _selectedCategoryId;
   bool _savingCurrentNote = false;
   String? _lastCurrentTempId;
+  Timer? _noteSaveDebounce;
 
   @override
   void initState() {
@@ -259,6 +264,12 @@ class _ActivityTabState extends State<ActivityTab> {
     if (cats.isNotEmpty) {
       _selectedCategoryId = cats.first.id;
     }
+  }
+
+  @override
+  void dispose() {
+    _noteSaveDebounce?.cancel();
+    super.dispose();
   }
 
   Future<void> _startFromSelected() async {
@@ -318,13 +329,23 @@ class _ActivityTabState extends State<ActivityTab> {
     await widget.controller.updateCurrentStartTime(updatedStart);
   }
 
+  void _debounceCurrentNoteSave(CurrentActivity current) {
+    if (widget.noteController.text.trim() == current.note.trim()) {
+      return;
+    }
+    _noteSaveDebounce?.cancel();
+    _noteSaveDebounce = Timer(const Duration(milliseconds: 600), () => _handleEditCurrentNote(current));
+  }
+
   Future<void> _handleEditCurrentNote(CurrentActivity current) async {
-    if (_savingCurrentNote) return;
+    if (_savingCurrentNote) {
+      _noteSaveDebounce?.cancel();
+      _noteSaveDebounce = Timer(const Duration(milliseconds: 400), () => _handleEditCurrentNote(current));
+      return;
+    }
     setState(() => _savingCurrentNote = true);
     try {
       await widget.controller.updateCurrentNote(widget.noteController.text.trim());
-      if (!mounted) return;
-      _showSnack('记录内容已更新');
     } catch (error) {
       _showSnack(error.toString());
     } finally {
@@ -494,7 +515,8 @@ class _ActivityTabState extends State<ActivityTab> {
       return;
     }
     CategoryModel? selected = initialCategory ?? categories.first;
-    DateTime selectedDate = DateTime.now();
+    DateTime startDate = DateTime.now();
+    DateTime endDate = DateTime.now();
     TimeOfDay start = TimeOfDay.fromDateTime(DateTime.now());
     TimeOfDay end = TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 25)));
     final noteController = TextEditingController(text: selected.name);
@@ -543,7 +565,7 @@ class _ActivityTabState extends State<ActivityTab> {
                   const SizedBox(height: 8),
                   TextField(
                     controller: noteController,
-                    decoration: const InputDecoration(labelText: '备注'),
+                    decoration: const InputDecoration(labelText: '记录内容'),
                   ),
                   const SizedBox(height: 8),
                   Row(
@@ -553,16 +575,16 @@ class _ActivityTabState extends State<ActivityTab> {
                           onPressed: () async {
                             final pickedDate = await showDatePicker(
                               context: context,
-                              initialDate: selectedDate,
+                              initialDate: startDate,
                               firstDate: DateTime.now().subtract(const Duration(days: 30)),
                               lastDate: DateTime.now(),
                             );
                             if (pickedDate != null) {
-                              setSheetState(() => selectedDate = pickedDate);
+                              setSheetState(() => startDate = pickedDate);
                             }
                           },
                           icon: const Icon(Icons.calendar_today_outlined),
-                          label: Text(DateFormat('yyyy-MM-dd').format(selectedDate)),
+                          label: Text(DateFormat('yyyy-MM-dd').format(startDate)),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -576,6 +598,28 @@ class _ActivityTabState extends State<ActivityTab> {
                           },
                           icon: const Icon(Icons.play_arrow),
                           label: Text(start.format(context)),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final pickedDate = await showDatePicker(
+                              context: context,
+                              initialDate: endDate,
+                              firstDate: DateTime.now().subtract(const Duration(days: 30)),
+                              lastDate: DateTime.now(),
+                            );
+                            if (pickedDate != null) {
+                              setSheetState(() => endDate = pickedDate);
+                            }
+                          },
+                          icon: const Icon(Icons.event),
+                          label: Text(DateFormat('yyyy-MM-dd').format(endDate)),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -621,19 +665,23 @@ class _ActivityTabState extends State<ActivityTab> {
     }
     final CategoryModel cat = selected!;
     final startDateTime = DateTime(
-      selectedDate.year,
-      selectedDate.month,
-      selectedDate.day,
+      startDate.year,
+      startDate.month,
+      startDate.day,
       start.hour,
       start.minute,
     );
     final endDateTime = DateTime(
-      selectedDate.year,
-      selectedDate.month,
-      selectedDate.day,
+      endDate.year,
+      endDate.month,
+      endDate.day,
       end.hour,
       end.minute,
     );
+    if (!startDateTime.isBefore(endDateTime)) {
+      _showSnack('结束时间需要晚于开始时间');
+      return;
+    }
     try {
       await widget.controller.manualAddRecord(
         categoryId: cat.id,
@@ -758,19 +806,22 @@ class _ActivityTabState extends State<ActivityTab> {
             const SizedBox(height: 12),
             TextField(
               controller: widget.noteController,
+              onChanged: (_) => _debounceCurrentNoteSave(current),
               decoration: InputDecoration(
                 labelText: '记录内容',
-                suffixIcon: IconButton(
-                  onPressed: () => _handleEditCurrentNote(current),
-                  icon: _savingCurrentNote
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
+                suffixIcon: _savingCurrentNote
+                    ? const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.save_alt),
-                  tooltip: '保存记录内容',
-                ),
+                        ),
+                      )
+                    : const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: Icon(Icons.check_circle, size: 18),
+                      ),
               ),
             ),
             const SizedBox(height: 16),
@@ -800,7 +851,7 @@ class _ActivityTabState extends State<ActivityTab> {
                     ),
                     onPressed: _handleStop,
                     icon: const Icon(Icons.stop),
-                    label: const Text('停止并移除'),
+                    label: const Text('停止并归档保存'),
                   ),
                 ),
               ],
@@ -902,8 +953,8 @@ class _ActivityTabState extends State<ActivityTab> {
                   ),
                   IconButton(
                     onPressed: () async => widget.controller.removeRecentContext(item.groupId),
-                    icon: const Icon(Icons.delete, color: Colors.redAccent),
-                    tooltip: '移除',
+                    icon: const Icon(Icons.archive_outlined, color: Colors.redAccent),
+                    tooltip: '归档保存',
                   ),
                 ],
               ),
@@ -1001,6 +1052,7 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
 
   StatsRange _range = StatsRange.today;
   DateTimeRange? _pieCustomRange;
+  int? _activeSliceIndex;
 
   @override
   Widget build(BuildContext context) {
@@ -1012,10 +1064,26 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
-                children: const [
-                  Icon(Icons.analytics_outlined, color: Colors.blue),
-                  SizedBox(width: 8),
-                  Text('统计与历史', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                children: [
+                  const Icon(Icons.analytics_outlined, color: Colors.blue),
+                  const SizedBox(width: 8),
+                  const Text('统计与历史', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      FilterChip(
+                        label: const Text('合并暂停片段'),
+                        selected: _mergePause,
+                        onSelected: (val) => setState(() => _mergePause = val),
+                      ),
+                      FilterChip(
+                        label: const Text('合并群组'),
+                        selected: _groupMerge,
+                        onSelected: (val) => setState(() => _groupMerge = val),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -1047,24 +1115,42 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
       children: [
         Padding(
           padding: const EdgeInsets.all(12),
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              ChoiceChip(
-                label: const Text('指定日期'),
-                selected: _timelineMode == TimelineRangeMode.day,
-                onSelected: (_) => setState(() => _timelineMode = TimelineRangeMode.day),
+              Expanded(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('最近24小时'),
+                      selected: _timelineMode == TimelineRangeMode.last24h,
+                      onSelected: (_) => setState(() => _timelineMode = TimelineRangeMode.last24h),
+                    ),
+                    ChoiceChip(
+                      label: const Text('指定日期'),
+                      selected: _timelineMode == TimelineRangeMode.day,
+                      onSelected: (_) => setState(() => _timelineMode = TimelineRangeMode.day),
+                    ),
+                    ChoiceChip(
+                      label: const Text('自定义范围'),
+                      selected: _timelineMode == TimelineRangeMode.custom,
+                      onSelected: (_) => setState(() => _timelineMode = TimelineRangeMode.custom),
+                    ),
+                  ],
+                ),
               ),
-              ChoiceChip(
-                label: const Text('最近24小时'),
-                selected: _timelineMode == TimelineRangeMode.last24h,
-                onSelected: (_) => setState(() => _timelineMode = TimelineRangeMode.last24h),
-              ),
-              ChoiceChip(
-                label: const Text('自定义范围'),
-                selected: _timelineMode == TimelineRangeMode.custom,
-                onSelected: (_) => setState(() => _timelineMode = TimelineRangeMode.custom),
+              const SizedBox(width: 12),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 260),
+                child: TextField(
+                  decoration: const InputDecoration(
+                    labelText: '搜索记录内容 / 分类',
+                    prefixIcon: Icon(Icons.search),
+                  ),
+                  onChanged: (value) => setState(() => _timelineKeyword = value),
+                ),
               ),
             ],
           ),
@@ -1117,7 +1203,10 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
                   children: [
                     Text(
                       '${DateFormat('MM-dd HH:mm').format(custom.start)} - ${DateFormat('MM-dd HH:mm').format(custom.end)}',
-                      style: Theme.of(context).textTheme.bodySmall,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
                     ),
                     const SizedBox(height: 8),
                     Wrap(
@@ -1215,34 +1304,7 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
               },
             ),
           ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: TextField(
-            decoration: const InputDecoration(
-              labelText: '搜索记录内容 / 分类',
-              prefixIcon: Icon(Icons.search),
-            ),
-            onChanged: (value) => setState(() => _timelineKeyword = value),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: Wrap(
-            spacing: 12,
-            children: [
-              FilterChip(
-                label: const Text('合并暂停片段'),
-                selected: _mergePause,
-                onSelected: (val) => setState(() => _mergePause = val),
-              ),
-              FilterChip(
-                label: const Text('合并群组'),
-                selected: _groupMerge,
-                onSelected: (val) => setState(() => _groupMerge = val),
-              ),
-            ],
-          ),
-        ),
+        const SizedBox(height: 8),
         Expanded(
           child: FutureBuilder<List<_TimelineGroupDisplay>>(
             future: _loadTimelineGroups(),
@@ -1257,50 +1319,27 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
               if (groups.isEmpty) {
                 return const Center(child: Text('当前范围暂无记录'));
               }
+              final dayGroups = <DateTime, List<_TimelineGroupDisplay>>{};
+              for (final group in groups) {
+                dayGroups.putIfAbsent(group.day, () => []).add(group);
+              }
+              final days = dayGroups.keys.toList()..sort((a, b) => b.compareTo(a));
               return ListView.builder(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
-                itemCount: groups.length,
+                itemCount: days.length,
                 itemBuilder: (context, index) {
-                  final group = groups[index];
-                  final category = widget.controller.findCategory(group.categoryId);
-                  final color = category?.color ?? Theme.of(context).colorScheme.primary;
-                  return Card(
-                    child: ExpansionTile(
-                      leading: CircleAvatar(
-                        backgroundColor: color.withOpacity(0.15),
-                        child: Icon(category?.iconData ?? Icons.category, color: color),
-                      ),
-                      title: Text(group.title),
-                      subtitle: Text(
-                        '${group.groupLabel} · 总计 ${_formatDuration(group.totalDuration)}',
-                      ),
-                      children: group.segments
-                          .map(
-                            (segment) => ListTile(
-                              title: Text(
-                                '${_formatClock(segment.startTime)} - ${_formatClock(segment.endTime)}',
-                              ),
-                              subtitle: Text(
-                                '片段 ${_formatDuration(segment.duration)} · ${segment.note.isEmpty ? '无备注' : segment.note}',
-                              ),
-                              trailing: Wrap(
-                                spacing: 8,
-                                children: [
-                                  IconButton(
-                                    tooltip: '编辑',
-                                    icon: const Icon(Icons.edit),
-                                    onPressed: () => _editRecord(segment),
-                                  ),
-                                  IconButton(
-                                    tooltip: '删除',
-                                    icon: const Icon(Icons.delete, color: Colors.redAccent),
-                                    onPressed: () => _deleteRecord(segment),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          )
-                          .toList(),
+                  final day = days[index];
+                  final grouped = dayGroups[day]!..sort((a, b) => b.end.compareTo(a.end));
+                  final dayLabel = DateFormat('MM月 dd日，EEEE', 'zh_CN').format(day);
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(dayLabel, style: Theme.of(context).textTheme.titleMedium),
+                        const SizedBox(height: 8),
+                        ...grouped.map(_buildTimelineCard),
+                      ],
                     ),
                   );
                 },
@@ -1312,6 +1351,85 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
     );
   }
 
+  Widget _buildTimelineCard(_TimelineGroupDisplay group) {
+    final category = widget.controller.findCategory(group.categoryId);
+    final color = category?.color ?? Theme.of(context).colorScheme.primary;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  backgroundColor: color.withOpacity(0.12),
+                  child: Icon(category?.iconData ?? Icons.category, color: color),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        group.title,
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${group.groupLabel} · 总计 ${_formatDuration(group.totalDuration)}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ...group.segments.map(
+              (segment) => Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${_formatClock(segment.startTime)} - ${_formatClock(segment.endTime)}',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '时长 ${_formatDuration(segment.duration)} · ${segment.note.isEmpty ? '无备注' : segment.note}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '编辑',
+                      icon: const Icon(Icons.edit),
+                      onPressed: () => _editRecord(segment),
+                    ),
+                    IconButton(
+                      tooltip: '删除',
+                      icon: const Icon(Icons.delete, color: Colors.redAccent),
+                      onPressed: () => _deleteRecord(segment),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildPie() {
     final dateRange = _resolvePieRange();
     return Column(
@@ -1319,42 +1437,37 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
       children: [
         Padding(
           padding: const EdgeInsets.all(12),
-          child: Wrap(
-            spacing: 8,
-            children: [
-              ChoiceChip(
-                label: const Text('今日'),
-                selected: _range == StatsRange.today,
-                onSelected: (_) => setState(() => _range = StatsRange.today),
-              ),
-              ChoiceChip(
-                label: const Text('本周'),
-                selected: _range == StatsRange.week,
-                onSelected: (_) => setState(() => _range = StatsRange.week),
-              ),
-              ChoiceChip(
-                label: const Text('本月'),
-                selected: _range == StatsRange.month,
-                onSelected: (_) => setState(() => _range = StatsRange.month),
-              ),
-              ChoiceChip(
-                label: const Text('最近24小时'),
-                selected: _range == StatsRange.last24h,
-                onSelected: (_) => setState(() => _range = StatsRange.last24h),
-              ),
-              ChoiceChip(
-                label: const Text('自定义'),
-                selected: _range == StatsRange.custom,
-                onSelected: (_) => setState(() => _range = StatsRange.custom),
-              ),
-              FilterChip(
-                label: const Text('合并群组'),
-                selected: _groupMerge,
-                onSelected: (val) => setState(() => _groupMerge = val),
-              ),
-            ],
+            child: Wrap(
+              spacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('最近24小时'),
+                  selected: _range == StatsRange.last24h,
+                  onSelected: (_) => setState(() => _range = StatsRange.last24h),
+                ),
+                ChoiceChip(
+                  label: const Text('本日'),
+                  selected: _range == StatsRange.today,
+                  onSelected: (_) => setState(() => _range = StatsRange.today),
+                ),
+                ChoiceChip(
+                  label: const Text('本周'),
+                  selected: _range == StatsRange.week,
+                  onSelected: (_) => setState(() => _range = StatsRange.week),
+                ),
+                ChoiceChip(
+                  label: const Text('本月'),
+                  selected: _range == StatsRange.month,
+                  onSelected: (_) => setState(() => _range = StatsRange.month),
+                ),
+                ChoiceChip(
+                  label: const Text('自定义'),
+                  selected: _range == StatsRange.custom,
+                  onSelected: (_) => setState(() => _range = StatsRange.custom),
+                ),
+              ],
+            ),
           ),
-        ),
         if (_range == StatsRange.custom)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1406,50 +1519,115 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
               final totals = snapshot.data!;
               final slices = _buildPieSlices(totals);
               final totalSeconds = totals.values.fold<int>(0, (prev, dur) => prev + dur.inSeconds);
+              final idx = _activeSliceIndex;
+              final activeIndex = (idx != null && idx < slices.length) ? idx : null;
               return Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                child: Column(
-                  children: [
-                    SimplePieChart(
-                      slices: slices,
-                      size: 260,
-                      centerLabel: _formatDuration(Duration(seconds: totalSeconds)),
-                    ),
-                    const SizedBox(height: 12),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        '范围: ${DateFormat('MM-dd').format(dateRange.$1)} - ${DateFormat('MM-dd').format(dateRange.$2)}',
-                        style: Theme.of(context).textTheme.bodySmall,
+                child: SingleChildScrollView(
+                  primary: false,
+                  child: Column(
+                    children: [
+                      SimplePieChart(
+                        slices: slices,
+                        size: 280,
+                        centerLabel: _formatDuration(Duration(seconds: totalSeconds)),
+                        highlightedIndex: activeIndex,
+                        onSliceTap: (index) => setState(() => _activeSliceIndex = index),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 8,
-                      children: slices
-                          .map(
-                            (slice) => Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 12,
-                                  height: 12,
-                                  decoration: BoxDecoration(
-                                    color: slice.color,
-                                    borderRadius: BorderRadius.circular(4),
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '范围: ${DateFormat('MM-dd').format(dateRange.$1)} - ${DateFormat('MM-dd').format(dateRange.$2)}',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      if (activeIndex != null && totalSeconds > 0)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.6),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Builder(
+                            builder: (context) {
+                              final slice = slices[activeIndex];
+                              final percent = (slice.value / totalSeconds) * 100;
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    slice.label,
+                                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                                   ),
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  '${slice.label} · ${_formatDuration(Duration(seconds: slice.value.toInt()))}',
-                                ),
-                              ],
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '时长 ${_formatDuration(Duration(seconds: slice.value.round()))} · 占比 ${percent.toStringAsFixed(1)}%',
+                                    style: Theme.of(context).textTheme.bodyMedium,
+                                  ),
+                                  Text(
+                                    '范围 ${DateFormat('MM-dd').format(dateRange.$1)} - ${DateFormat('MM-dd').format(dateRange.$2)}',
+                                    style: Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                        )
+                      else
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            '点击饼图扇区查看具体占比',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 8,
+                        children: slices.asMap().entries.map((entry) {
+                          final idx = entry.key;
+                          final slice = entry.value;
+                          final percent = totalSeconds == 0 ? 0 : (slice.value / totalSeconds) * 100;
+                          final selected = idx == activeIndex;
+                          return InkWell(
+                            onTap: () => setState(() => _activeSliceIndex = idx),
+                            borderRadius: BorderRadius.circular(10),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: selected ? slice.color.withOpacity(0.14) : null,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 12,
+                                    height: 12,
+                                    decoration: BoxDecoration(
+                                      color: slice.color,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${slice.label} · ${_formatDuration(Duration(seconds: slice.value.round()))} · ${percent.toStringAsFixed(1)}%',
+                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                                        ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          )
-                          .toList(),
-                    ),
-                  ],
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
                 ),
               );
             },
@@ -1665,8 +1843,8 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
 
     final filtered = records
         .where((r) =>
-            !r.startTime.isBefore(range.$1) &&
-            !r.startTime.isAfter(range.$2) &&
+            r.endTime.isAfter(range.$1) &&
+            r.startTime.isBefore(range.$2) &&
             matchKeyword(r))
         .toList()
       ..sort((a, b) => a.startTime.compareTo(b.startTime));
@@ -1675,6 +1853,7 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
       return const [];
     }
 
+    List<_TimelineGroupDisplay> base;
     if (_mergePause) {
       final byGroupId = <String, List<ActivityRecord>>{};
       for (final record in filtered) {
@@ -1688,13 +1867,12 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
           categoryId: first.categoryId,
           groupLabel: _groupLabel(widget.controller.findCategory(first.categoryId)),
           segments: segs,
+          day: DateTime(first.startTime.year, first.startTime.month, first.startTime.day),
         );
       }).toList()
         ..sort((a, b) => a.start.compareTo(b.start));
-      return _groupMerge ? _mergeByGroupLabel(aggregated) : aggregated;
-    }
-
-    if (_groupMerge) {
+      base = _groupMerge ? _mergeByGroupLabel(aggregated) : aggregated;
+    } else if (_groupMerge) {
       final byGroupLabel = <String, List<ActivityRecord>>{};
       for (final record in filtered) {
         final key = _groupLabel(widget.controller.findCategory(record.categoryId));
@@ -1708,22 +1886,26 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
           categoryId: first.categoryId,
           groupLabel: entry.key,
           segments: segs,
+          day: DateTime(first.startTime.year, first.startTime.month, first.startTime.day),
         );
       }).toList()
         ..sort((a, b) => a.start.compareTo(b.start));
-      return grouped;
+      base = grouped;
+    } else {
+      base = filtered
+          .map(
+            (r) => _TimelineGroupDisplay(
+              title: _resolveNote(r),
+              categoryId: r.categoryId,
+              groupLabel: _groupLabel(widget.controller.findCategory(r.categoryId)),
+              segments: [r],
+              day: DateTime(r.startTime.year, r.startTime.month, r.startTime.day),
+            ),
+          )
+          .toList();
     }
 
-    return filtered
-        .map(
-          (r) => _TimelineGroupDisplay(
-            title: _resolveNote(r),
-            categoryId: r.categoryId,
-            groupLabel: _groupLabel(widget.controller.findCategory(r.categoryId)),
-            segments: [r],
-          ),
-        )
-        .toList();
+    return _splitGroupsByDay(base);
   }
 
   (DateTime, DateTime) _timelineRange() {
@@ -1742,6 +1924,31 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
         final picked = _timelineCustomRange ?? fallback;
         return (picked.start, picked.end);
     }
+  }
+
+  List<_TimelineGroupDisplay> _splitGroupsByDay(List<_TimelineGroupDisplay> items) {
+    final result = <_TimelineGroupDisplay>[];
+    for (final item in items) {
+      final byDay = <DateTime, List<ActivityRecord>>{};
+      for (final seg in item.segments) {
+        final dayKey = DateTime(seg.startTime.year, seg.startTime.month, seg.startTime.day);
+        byDay.putIfAbsent(dayKey, () => []).add(seg);
+      }
+      byDay.forEach((day, segs) {
+        final ordered = [...segs]..sort((a, b) => b.startTime.compareTo(a.startTime));
+        result.add(
+          _TimelineGroupDisplay(
+            title: item.title,
+            categoryId: item.categoryId,
+            groupLabel: item.groupLabel,
+            segments: ordered,
+            day: day,
+          ),
+        );
+      });
+    }
+    result.sort((a, b) => b.end.compareTo(a.end));
+    return result;
   }
 
   List<PieSliceData> _buildPieSlices(Map<String, Duration> totals) {
@@ -1814,6 +2021,7 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
         categoryId: first.categoryId,
         groupLabel: entry.key,
         segments: segs,
+        day: DateTime(first.startTime.year, first.startTime.month, first.startTime.day),
       );
     }).toList()
       ..sort((a, b) => a.start.compareTo(b.start));
@@ -1827,20 +2035,23 @@ class _TimelineGroupDisplay {
     required this.categoryId,
     required this.groupLabel,
     required this.segments,
+    required this.day,
   });
 
   final String title;
   final String categoryId;
   final String groupLabel;
   final List<ActivityRecord> segments;
+  final DateTime day;
 
   Duration get totalDuration {
     final seconds = segments.fold<int>(0, (prev, e) => prev + e.durationSeconds);
     return Duration(seconds: seconds);
   }
 
-  DateTime get start => segments.first.startTime;
-  DateTime get end => segments.last.endTime;
+  DateTime get start =>
+      segments.map((e) => e.startTime).reduce((a, b) => a.isBefore(b) ? a : b);
+  DateTime get end => segments.map((e) => e.endTime).reduce((a, b) => a.isAfter(b) ? a : b);
 }
 
 class CategoryManageTab extends StatefulWidget {
@@ -1899,6 +2110,32 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     Icons.coffee,
     Icons.nightlight_round,
   ];
+
+  List<IconData> _buildIconOptions(IconData current) {
+    final seen = <String>{};
+    final result = <IconData>[];
+    String keyFor(IconData icon) => '${icon.fontFamily ?? 'MaterialIcons'}-${icon.codePoint}';
+    void addIcon(IconData icon) {
+      final key = keyFor(icon);
+      if (seen.add(key)) {
+        result.add(icon);
+      }
+    }
+
+    addIcon(current);
+    for (final icon in _iconOptions) {
+      addIcon(icon);
+    }
+    return result;
+  }
+
+  String _deriveGroupFromName(String name) {
+    final parts = name.split('.');
+    if (parts.length >= 2 && parts.first.trim().isNotEmpty) {
+      return parts.first.trim();
+    }
+    return '';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1983,6 +2220,14 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     final groupController = TextEditingController(text: existing?.group ?? '');
     Color color = existing?.color ?? _palette.first;
     IconData icon = existing?.iconData ?? _iconOptions.first;
+    bool groupEdited = (existing?.group.isNotEmpty ?? false);
+    bool updatingGroupText = false;
+    if (!groupEdited) {
+      final derived = _deriveGroupFromName(nameController.text);
+      if (derived.isNotEmpty) {
+        groupController.text = derived;
+      }
+    }
     bool enabled = existing?.enabled ?? true;
 
     final confirmed = await showDialog<bool>(
@@ -1998,14 +2243,34 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                   TextField(
                     controller: nameController,
                     decoration: const InputDecoration(labelText: '名称'),
+                    onChanged: (value) {
+                      final derived = _deriveGroupFromName(value);
+                      if (derived.isEmpty && groupEdited && groupController.text.trim().isNotEmpty) {
+                        return;
+                      }
+                      updatingGroupText = true;
+                      setDialogState(() {
+                        groupController.text = derived;
+                        if (derived.isNotEmpty) {
+                          groupEdited = false;
+                        }
+                      });
+                      updatingGroupText = false;
+                    },
                   ),
                   const SizedBox(height: 8),
                   TextField(
                     controller: groupController,
                     decoration: const InputDecoration(
                       labelText: '分组/群组名',
-                      helperText: '可用“群组.子类”命名，例：睡眠.午睡',
+                      helperText: '名称含“.”自动解析群组，例：娱乐.上网探究',
                     ),
+                    onChanged: (_) {
+                      if (updatingGroupText) return;
+                      setDialogState(() {
+                        groupEdited = groupController.text.trim().isNotEmpty;
+                      });
+                    },
                   ),
                   const SizedBox(height: 12),
                   Wrap(
@@ -2037,7 +2302,7 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                     child: DropdownButton<IconData>(
                       isExpanded: true,
                       value: icon,
-                      items: _iconOptions
+                      items: _buildIconOptions(icon)
                           .map(
                             (opt) => DropdownMenuItem(
                               value: opt,
@@ -2079,6 +2344,8 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
       _showSnack('名称不能为空');
       return;
     }
+    final derivedGroup = _deriveGroupFromName(name);
+    final resolvedGroup = derivedGroup.isNotEmpty ? derivedGroup : groupController.text.trim();
     final id = existing?.id ?? _buildCategoryId(name);
     final updated = CategoryModel(
       id: id,
@@ -2087,7 +2354,7 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
       colorHex: colorToHex(color),
       order: existing?.order ?? widget.controller.categories.length,
       enabled: enabled,
-      group: groupController.text.trim(),
+      group: resolvedGroup,
     );
     await widget.controller.addOrUpdateCategory(updated);
   }
@@ -2228,11 +2495,15 @@ class SimplePieChart extends StatelessWidget {
     required this.slices,
     this.size = 220,
     this.centerLabel,
+    this.highlightedIndex,
+    this.onSliceTap,
   });
 
   final List<PieSliceData> slices;
   final double size;
   final String? centerLabel;
+  final int? highlightedIndex;
+  final ValueChanged<int>? onSliceTap;
 
   @override
   Widget build(BuildContext context) {
@@ -2243,27 +2514,57 @@ class SimplePieChart extends StatelessWidget {
         child: const Center(child: Text('暂无数据')),
       );
     }
+    final outerRadius = size / 2 - 20;
+    final maxStroke = size * 0.22;
+    final innerRadius = outerRadius - maxStroke;
+    Widget chart = CustomPaint(
+      size: Size.square(size),
+      painter: _PiePainter(slices, highlightedIndex),
+    );
+    if (onSliceTap != null) {
+      chart = GestureDetector(
+        onTapDown: (details) {
+          final local = details.localPosition;
+          final center = Offset(size / 2, size / 2);
+          final dx = local.dx - center.dx;
+          final dy = local.dy - center.dy;
+          final distance = sqrt(dx * dx + dy * dy);
+          if (distance < innerRadius || distance > outerRadius + maxStroke / 2) {
+            return;
+          }
+          double angle = atan2(dy, dx);
+          angle = (angle + 2 * pi) % (2 * pi);
+          double cursor = -pi / 2;
+          for (var i = 0; i < slices.length; i++) {
+            final sweep = (slices[i].value / total) * 2 * pi;
+            if (angle >= cursor && angle <= cursor + sweep) {
+              onSliceTap!(i);
+              break;
+            }
+            cursor += sweep;
+          }
+        },
+        child: chart,
+      );
+    }
     return SizedBox(
       height: size,
       width: size,
       child: Stack(
         alignment: Alignment.center,
         children: [
-          CustomPaint(
-            size: Size.square(size),
-            painter: _PiePainter(slices),
-          ),
+          chart,
           Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               if (centerLabel != null)
                 Text(
                   centerLabel!,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
                 ),
               Text(
                 '共 ${slices.length} 类',
-                style: Theme.of(context).textTheme.bodySmall,
+                style: Theme.of(context).textTheme.bodyMedium,
               ),
             ],
           ),
@@ -2274,27 +2575,32 @@ class SimplePieChart extends StatelessWidget {
 }
 
 class _PiePainter extends CustomPainter {
-  _PiePainter(this.slices);
+  _PiePainter(this.slices, this.highlightedIndex);
 
   final List<PieSliceData> slices;
+  final int? highlightedIndex;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final rect = Rect.fromLTWH(0, 0, size.width, size.height);
-    final paint = Paint()..style = PaintingStyle.stroke..strokeWidth = size.width * 0.18;
+    final rect = Rect.fromLTWH(0, 0, size.width, size.height).deflate(20);
+    final paint = Paint()..style = PaintingStyle.stroke;
+    final baseStroke = size.width * 0.18;
+    final highlightStroke = size.width * 0.22;
     final total = slices.fold<double>(0, (prev, e) => prev + e.value);
     double startRadian = -pi / 2;
-    for (final slice in slices) {
+    for (var i = 0; i < slices.length; i++) {
+      final slice = slices[i];
       final sweep = (slice.value / total) * 2 * pi;
       paint.color = slice.color;
-      canvas.drawArc(rect.deflate(20), startRadian, sweep, false, paint);
+      paint.strokeWidth = i == highlightedIndex ? highlightStroke : baseStroke;
+      canvas.drawArc(rect, startRadian, sweep, false, paint);
       startRadian += sweep;
     }
   }
 
   @override
   bool shouldRepaint(covariant _PiePainter oldDelegate) {
-    return oldDelegate.slices != slices;
+    return oldDelegate.slices != slices || oldDelegate.highlightedIndex != highlightedIndex;
   }
 }
 

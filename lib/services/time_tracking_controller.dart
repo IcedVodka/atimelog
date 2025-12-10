@@ -239,27 +239,53 @@ class TimeTrackingController extends ChangeNotifier {
     if (!startTime.isBefore(endTime)) {
       throw StateError('结束时间必须晚于开始时间');
     }
-    if (!isSameDay(startTime, endTime)) {
-      throw StateError('补录暂时只支持同一天');
+    final resolvedNote = _resolveNote(categoryId, note);
+    final groupId = _uuid.v4();
+    final segments = <ActivityRecord>[];
+    var cursorStart = startTime;
+    while (cursorStart.isBefore(endTime)) {
+      final endOfDay = DateTime(cursorStart.year, cursorStart.month, cursorStart.day, 23, 59, 59, 999);
+      final segmentEnd = endTime.isBefore(endOfDay) ? endTime : endOfDay;
+      final durationSeconds = max(1, segmentEnd.difference(cursorStart).inSeconds);
+      segments.add(
+        ActivityRecord(
+          id: _uuid.v4(),
+          groupId: groupId,
+          categoryId: categoryId,
+          startTime: cursorStart,
+          endTime: segmentEnd,
+          durationSeconds: durationSeconds,
+          note: resolvedNote,
+          isCrossDaySplit: !isSameDay(startTime, endTime),
+        ),
+      );
+      if (!segmentEnd.isBefore(endTime)) {
+        break;
+      }
+      cursorStart = DateTime(cursorStart.year, cursorStart.month, cursorStart.day).add(const Duration(days: 1));
     }
-    final record = ActivityRecord(
-      id: _uuid.v4(),
-      groupId: _uuid.v4(),
+
+    for (final segment in segments) {
+      await _storage.appendActivity(segment);
+    }
+    final mergedRecord = ActivityRecord(
+      id: segments.first.id,
+      groupId: groupId,
       categoryId: categoryId,
       startTime: startTime,
       endTime: endTime,
-      durationSeconds: max(1, endTime.difference(startTime).inSeconds),
-      note: _resolveNote(categoryId, note),
+      durationSeconds: segments.fold(0, (prev, e) => prev + e.durationSeconds),
+      note: resolvedNote,
     );
-    await _storage.appendActivity(record);
-    final updatedContexts = _buildRecentContexts(record, push: true);
+
+    final updatedContexts = _buildRecentContexts(mergedRecord, push: true);
     _session = _session.copyWith(
       recentContexts: updatedContexts,
       lastUpdated: DateTime.now().millisecondsSinceEpoch,
     );
     await _storage.writeSession(_session);
     notifyListeners();
-    return record;
+    return mergedRecord;
   }
 
   Future<List<ActivityRecord>> loadDayRecords(DateTime date) {
@@ -349,10 +375,15 @@ class TimeTrackingController extends ChangeNotifier {
     final records = await _storage.loadRangeRecords(start, end);
     final map = <String, int>{};
     for (final record in records) {
-      if (record.startTime.isBefore(start) || record.startTime.isAfter(end)) {
+      // 仅统计与查询时间窗有交集的片段，按交集时长计入。
+      if (!record.endTime.isAfter(start) || !record.startTime.isBefore(end)) {
         continue;
       }
-      map.update(record.categoryId, (value) => value + record.durationSeconds, ifAbsent: () => record.durationSeconds);
+      final clippedStart = record.startTime.isBefore(start) ? start : record.startTime;
+      final clippedEnd = record.endTime.isAfter(end) ? end : record.endTime;
+      final seconds = clippedEnd.difference(clippedStart).inSeconds;
+      if (seconds <= 0) continue;
+      map.update(record.categoryId, (value) => value + seconds, ifAbsent: () => seconds);
     }
     return map.map((key, value) => MapEntry(key, Duration(seconds: value)));
   }
