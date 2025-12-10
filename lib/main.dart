@@ -494,16 +494,17 @@ class _ActivityTabState extends State<ActivityTab> {
       _showSnack('暂不支持跨日修改最近活动');
       return;
     }
-    await widget.controller.updateRecord(
-      date: latest.startTime,
-      recordId: latest.id,
+    final resolvedNote = noteController.text.trim().isEmpty
+        ? (category?.name ?? '其他.${contextItem.categoryId}')
+        : noteController.text.trim();
+    await widget.controller.updateRecordWithSync(
+      record: latest,
       newStart: newStart,
       newEnd: newEnd,
-      note: noteController.text.trim().isEmpty
-          ? (category?.name ?? contextItem.note)
-          : noteController.text.trim(),
+      note: resolvedNote,
+      syncGroupNotes: true,
     );
-    await widget.controller.updateRecentNote(contextItem.groupId, noteController.text.trim());
+    await widget.controller.updateRecentNote(contextItem.groupId, resolvedNote);
     setState(() {});
     _showSnack('已更新最近活动');
   }
@@ -520,6 +521,7 @@ class _ActivityTabState extends State<ActivityTab> {
     TimeOfDay start = TimeOfDay.fromDateTime(DateTime.now());
     TimeOfDay end = TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 25)));
     final noteController = TextEditingController(text: selected.name);
+    bool noteTouched = false;
 
     final result = await showModalBottomSheet<bool>(
       context: context,
@@ -560,12 +562,22 @@ class _ActivityTabState extends State<ActivityTab> {
                           ),
                         )
                         .toList(),
-                    onChanged: (value) => setSheetState(() => selected = value),
+                    onChanged: (value) => setSheetState(() {
+                      final previousName = selected?.name ?? '';
+                      selected = value;
+                      final currentText = noteController.text.trim();
+                      final shouldSync = !noteTouched || currentText.isEmpty || currentText == previousName;
+                      if (value != null && shouldSync) {
+                        noteController.text = value.name;
+                        noteTouched = false;
+                      }
+                    }),
                   ),
                   const SizedBox(height: 8),
                   TextField(
                     controller: noteController,
                     decoration: const InputDecoration(labelText: '记录内容'),
+                    onChanged: (_) => noteTouched = true,
                   ),
                   const SizedBox(height: 8),
                   Row(
@@ -971,57 +983,73 @@ class _ActivityTabState extends State<ActivityTab> {
       children: [
         Text('分类网格', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 4,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            childAspectRatio: 0.9,
-          ),
-          itemCount: categories.length,
-          itemBuilder: (context, index) {
-            final category = categories[index];
-            return InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: () async {
-                const noteText = '';
-                try {
-                  await widget.controller.switchToCategory(
-                    categoryId: category.id,
-                    note: noteText,
-                  );
-                } catch (error) {
-                  _showSnack(error.toString());
-                }
-              },
-              onLongPress: () => showManualDialog(category),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.4),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: category.color.withOpacity(0.3)),
-                ),
-                padding: const EdgeInsets.all(8),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(category.iconData, color: category.color, size: 28),
-                    const SizedBox(height: 6),
-                    Text(
-                      category.name,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                    if (category.group.isNotEmpty)
-                      Text(
-                        category.group,
-                        style: Theme.of(context).textTheme.labelSmall,
-                      ),
-                  ],
-                ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final crossAxisCount = max(5, min(8, (width / 90).floor()));
+            return GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: crossAxisCount,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                childAspectRatio: 0.78,
               ),
+              itemCount: categories.length,
+              itemBuilder: (context, index) {
+                final category = categories[index];
+                final groupName = category.group.isNotEmpty
+                    ? category.group
+                    : (category.name.contains('.') ? category.name.split('.').first : '');
+                return InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () async {
+                    const noteText = '';
+                    try {
+                      await widget.controller.switchToCategory(
+                        categoryId: category.id,
+                        note: noteText,
+                      );
+                    } catch (error) {
+                      _showSnack(error.toString());
+                    }
+                  },
+                  onLongPress: () => showManualDialog(category),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.35),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: category.color.withOpacity(0.35)),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(category.iconData, color: category.color, size: 26),
+                        const SizedBox(height: 6),
+                        Text(
+                          category.name,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (groupName.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              groupName,
+                              style: Theme.of(context).textTheme.labelSmall,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             );
           },
         ),
@@ -1353,7 +1381,25 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
 
   Widget _buildTimelineCard(_TimelineGroupDisplay group) {
     final category = widget.controller.findCategory(group.categoryId);
-    final color = category?.color ?? Theme.of(context).colorScheme.primary;
+    final color = _categoryColor(group.categoryId);
+    final displayName = _groupMerge ? group.groupLabel : _categoryDisplayName(group.categoryId);
+    Widget infoPill(String text, IconData icon) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 4),
+            Text(text, style: const TextStyle(fontWeight: FontWeight.w600)),
+          ],
+        ),
+      );
+    }
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: Padding(
@@ -1374,13 +1420,18 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        group.title,
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                        displayName,
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        '${group.groupLabel} · 总计 ${_formatDuration(group.totalDuration)}',
-                        style: Theme.of(context).textTheme.bodySmall,
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          infoPill('群组 ${group.groupLabel}', Icons.folder_special_outlined),
+                          infoPill('总计 ${_formatDuration(group.totalDuration)}', Icons.av_timer),
+                          infoPill('片段 ${group.segments.length}', Icons.view_agenda_outlined),
+                        ],
                       ),
                     ],
                   ),
@@ -1389,8 +1440,14 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
             ),
             const SizedBox(height: 8),
             ...group.segments.map(
-              (segment) => Padding(
-                padding: const EdgeInsets.only(top: 6),
+              (segment) => Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: color.withOpacity(0.1)),
+                ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1400,25 +1457,43 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
                         children: [
                           Text(
                             '${_formatClock(segment.startTime)} - ${_formatClock(segment.endTime)}',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
-                          const SizedBox(height: 2),
+                          const SizedBox(height: 4),
                           Text(
-                            '时长 ${_formatDuration(segment.duration)} · ${segment.note.isEmpty ? '无备注' : segment.note}',
-                            style: Theme.of(context).textTheme.bodySmall,
+                            segment.note.isEmpty ? '记录内容：无' : '记录内容：${segment.note}',
+                            style: Theme.of(context).textTheme.bodyMedium,
                           ),
                         ],
                       ),
                     ),
-                    IconButton(
-                      tooltip: '编辑',
-                      icon: const Icon(Icons.edit),
-                      onPressed: () => _editRecord(segment),
-                    ),
-                    IconButton(
-                      tooltip: '删除',
-                      icon: const Icon(Icons.delete, color: Colors.redAccent),
-                      onPressed: () => _deleteRecord(segment),
+                    const SizedBox(width: 10),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          _formatDuration(segment.duration),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: color,
+                          ),
+                        ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: '编辑',
+                              icon: const Icon(Icons.edit),
+                              onPressed: () => _editRecord(segment),
+                            ),
+                            IconButton(
+                              tooltip: '删除',
+                              icon: const Icon(Icons.delete, color: Colors.redAccent),
+                              onPressed: () => _deleteRecord(segment),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -1543,51 +1618,17 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
                         ),
                       ),
                       const SizedBox(height: 12),
-                      if (activeIndex != null && totalSeconds > 0)
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.6),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Builder(
-                            builder: (context) {
-                              final slice = slices[activeIndex];
-                              final percent = (slice.value / totalSeconds) * 100;
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    slice.label,
-                                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '时长 ${_formatDuration(Duration(seconds: slice.value.round()))} · 占比 ${percent.toStringAsFixed(1)}%',
-                                    style: Theme.of(context).textTheme.bodyMedium,
-                                  ),
-                                  Text(
-                                    '范围 ${DateFormat('MM-dd').format(dateRange.$1)} - ${DateFormat('MM-dd').format(dateRange.$2)}',
-                                    style: Theme.of(context).textTheme.bodySmall,
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
-                        )
-                      else
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            '点击饼图扇区查看具体占比',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          activeIndex != null && totalSeconds > 0
+                              ? '已选：${slices[activeIndex].label} · ${_formatDuration(Duration(seconds: slices[activeIndex].value.round()))} · ${(slices[activeIndex].value / totalSeconds * 100).toStringAsFixed(1)}%'
+                              : '点击饼图扇区查看具体占比',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
                         ),
+                      ),
                       const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 8,
+                      Column(
                         children: slices.asMap().entries.map((entry) {
                           final idx = entry.key;
                           final slice = entry.value;
@@ -1595,15 +1636,19 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
                           final selected = idx == activeIndex;
                           return InkWell(
                             onTap: () => setState(() => _activeSliceIndex = idx),
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(12),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              width: double.infinity,
+                              margin: const EdgeInsets.only(bottom: 10),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                               decoration: BoxDecoration(
-                                color: selected ? slice.color.withOpacity(0.14) : null,
-                                borderRadius: BorderRadius.circular(10),
+                                color: selected
+                                    ? slice.color.withOpacity(0.12)
+                                    : Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: slice.color.withOpacity(0.35)),
                               ),
                               child: Row(
-                                mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Container(
                                     width: 12,
@@ -1613,12 +1658,30 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                   ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    '${slice.label} · ${_formatDuration(Duration(seconds: slice.value.round()))} · ${percent.toStringAsFixed(1)}%',
-                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          slice.label,
+                                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
                                         ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          '${_formatDuration(Duration(seconds: slice.value.round()))} · ${percent.toStringAsFixed(1)}%',
+                                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 14),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Text(
+                                    '${percent.toStringAsFixed(1)}%',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 16,
+                                      color: slice.color,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -1783,12 +1846,13 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
       _showSnack('暂不支持跨日修改，若需跨日请拆分记录');
       return;
     }
-    await widget.controller.updateRecord(
-      date: record.startTime,
-      recordId: record.id,
+    final resolvedNote = noteController.text.trim().isEmpty ? _resolveNote(record) : noteController.text.trim();
+    await widget.controller.updateRecordWithSync(
+      record: record,
       newStart: startTime,
       newEnd: endTime,
-      note: noteController.text.trim().isEmpty ? _resolveNote(record) : noteController.text.trim(),
+      note: resolvedNote,
+      syncGroupNotes: true,
     );
     final updatedRecords = await widget.controller.loadDayRecords(record.startTime);
     final hasOverlap = widget.controller.hasOverlap(updatedRecords, ignoringId: record.id);
@@ -1834,10 +1898,9 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
 
     bool matchKeyword(ActivityRecord record) {
       if (keyword.isEmpty) return true;
-      final category = widget.controller.findCategory(record.categoryId);
       final noteText = record.note.toLowerCase();
-      final catName = category?.name.toLowerCase() ?? '';
-      final groupLabel = _groupLabel(category).toLowerCase();
+      final catName = _categoryDisplayName(record.categoryId).toLowerCase();
+      final groupLabel = _groupLabel(widget.controller.findCategory(record.categoryId)).toLowerCase();
       return noteText.contains(keyword) || catName.contains(keyword) || groupLabel.contains(keyword);
     }
 
@@ -1863,7 +1926,7 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
         final segs = [...entry.value]..sort((a, b) => a.startTime.compareTo(b.startTime));
         final first = segs.first;
         return _TimelineGroupDisplay(
-          title: _resolveNote(first),
+          title: _categoryDisplayName(first.categoryId),
           categoryId: first.categoryId,
           groupLabel: _groupLabel(widget.controller.findCategory(first.categoryId)),
           segments: segs,
@@ -1895,7 +1958,7 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
       base = filtered
           .map(
             (r) => _TimelineGroupDisplay(
-              title: _resolveNote(r),
+              title: _categoryDisplayName(r.categoryId),
               categoryId: r.categoryId,
               groupLabel: _groupLabel(widget.controller.findCategory(r.categoryId)),
               segments: [r],
@@ -1954,56 +2017,64 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
   List<PieSliceData> _buildPieSlices(Map<String, Duration> totals) {
     if (!_groupMerge) {
       return totals.entries.map((entry) {
-        final category = widget.controller.findCategory(entry.key);
         return PieSliceData(
-          label: category?.name ?? entry.key,
+          label: _categoryDisplayName(entry.key),
           value: entry.value.inSeconds.toDouble(),
-          color: category?.color ?? Colors.grey,
+          color: _categoryColor(entry.key),
         );
       }).toList();
     }
 
     final groupDurations = <String, int>{};
     totals.forEach((catId, duration) {
-      final category = widget.controller.findCategory(catId);
-      final key = _groupLabel(category);
+      final key = _groupLabel(widget.controller.findCategory(catId));
       groupDurations.update(key, (value) => value + duration.inSeconds, ifAbsent: () => duration.inSeconds);
     });
 
     return groupDurations.entries.map((entry) {
-      final sampleCategory = widget.controller.categories.firstWhere(
-        (c) => _groupLabel(c) == entry.key,
-        orElse: () => widget.controller.categories.isNotEmpty
-            ? widget.controller.categories.first
-            : CategoryModel(
-                id: 'placeholder',
-                name: '未分组',
-                iconCode: Icons.category_outlined.codePoint,
-                colorHex: '#9E9E9E',
-                order: 0,
-              ),
-      );
       return PieSliceData(
         label: entry.key,
         value: entry.value.toDouble(),
-        color: sampleCategory.color,
+        color: _groupColor(entry.key),
       );
     }).toList();
   }
 
+  String _categoryDisplayName(String categoryId) {
+    final category = widget.controller.findCategory(categoryId);
+    if (category != null) {
+      return category.name;
+    }
+    final fallback = categoryId.trim().isEmpty ? '未命名' : categoryId.trim();
+    return '其他.$fallback';
+  }
+
+  Color _categoryColor(String categoryId) {
+    final category = widget.controller.findCategory(categoryId);
+    return category?.color ?? Colors.grey;
+  }
+
+  Color _groupColor(String groupLabel) {
+    for (final cat in widget.controller.categories) {
+      if (_groupLabel(cat) == groupLabel) {
+        return cat.color;
+      }
+    }
+    return Colors.grey;
+  }
+
   String _resolveNote(ActivityRecord record) {
-    if (record.note.isNotEmpty) return record.note;
-    final category = widget.controller.findCategory(record.categoryId);
-    return category?.name ?? record.categoryId;
+    if (record.note.trim().isNotEmpty) return record.note.trim();
+    return _categoryDisplayName(record.categoryId);
   }
 
   String _groupLabel(CategoryModel? category) {
-    if (category == null) return '未分组';
-    if (category.group.trim().isNotEmpty) {
-      return category.group.trim();
-    }
+    if (category == null) return '其他';
     if (category.name.contains('.')) {
       return category.name.split('.').first;
+    }
+    if (category.group.trim().isNotEmpty) {
+      return category.group.trim();
     }
     return category.name;
   }
@@ -2068,23 +2139,32 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     Color(0xFF1565C0), // 蓝
     Color(0xFF1E88E5),
     Color(0xFF90CAF9),
+    Color(0xFF0D47A1),
     Color(0xFF6A1B9A), // 紫
     Color(0xFF8E24AA),
     Color(0xFFBA68C8),
+    Color(0xFF9C27B0),
     Color(0xFFC2185B), // 粉
     Color(0xFFE91E63),
     Color(0xFFFF80AB),
+    Color(0xFFD81B60),
     Color(0xFF00897B), // 青
     Color(0xFF26A69A),
     Color(0xFF26C6DA),
+    Color(0xFF4DD0E1),
     Color(0xFF2E7D32), // 绿
     Color(0xFF43A047),
     Color(0xFF81C784),
+    Color(0xFFA5D6A7),
     Color(0xFFFFB300), // 黄/橙
     Color(0xFFFFD54F),
     Color(0xFFFF8F00),
+    Color(0xFFFF7043),
     Color(0xFF6D4C41), // 棕
+    Color(0xFF8D6E63),
     Color(0xFF455A64), // 深灰
+    Color(0xFF607D8B),
+    Color(0xFF9E9E9E),
   ];
   final List<IconData> _iconOptions = const [
     Icons.computer,
@@ -2109,7 +2189,26 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     Icons.travel_explore,
     Icons.coffee,
     Icons.nightlight_round,
+    Icons.camera_alt_outlined,
+    Icons.flight_takeoff,
+    Icons.hiking,
+    Icons.public,
+    Icons.lightbulb_outline,
+    Icons.laptop_mac,
+    Icons.directions_bike,
+    Icons.local_hospital,
+    Icons.mediation,
+    Icons.palette_outlined,
+    Icons.waves,
+    Icons.timer,
+    Icons.restaurant_menu,
+    Icons.spa,
+    Icons.emoji_events,
+    Icons.handyman_outlined,
+    Icons.build_circle_outlined,
+    Icons.cake_outlined,
   ];
+  int? _draggingIndex;
 
   List<IconData> _buildIconOptions(IconData current) {
     final seen = <String>{};
@@ -2161,49 +2260,60 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                 ),
               ),
               Expanded(
-                child: ReorderableListView.builder(
-                  padding: const EdgeInsets.only(left: 12, right: 12, bottom: 80),
-                  itemCount: categories.length,
-                  onReorder: (oldIndex, newIndex) async {
-                    final updated = [...categories];
-                    if (oldIndex < newIndex) {
-                      newIndex -= 1;
-                    }
-                    final item = updated.removeAt(oldIndex);
-                    updated.insert(newIndex, item);
-                    await widget.controller.reorderCategories(updated);
-                  },
-                  itemBuilder: (context, index) {
-                    final cat = categories[index];
-                    return Card(
-                      key: ValueKey(cat.id),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: cat.color.withOpacity(0.15),
-                          child: Icon(cat.iconData, color: cat.color),
-                        ),
-                        title: Text(cat.name),
-                        subtitle: Text('${cat.group.isEmpty ? '未分组' : cat.group} · 顺序 ${cat.order}'),
-                        trailing: Wrap(
-                          spacing: 8,
-                          children: [
-                            Switch(
-                              value: cat.enabled,
-                              onChanged: (val) => widget.controller.toggleCategory(cat.id, val),
-                            ),
-                            IconButton(
-                              tooltip: '编辑',
-                              icon: const Icon(Icons.edit),
-                              onPressed: () => _showCategoryEditor(existing: cat),
-                            ),
-                            IconButton(
-                              tooltip: '停用',
-                              icon: const Icon(Icons.archive_outlined),
-                              onPressed: () => widget.controller.toggleCategory(cat.id, false),
-                            ),
-                          ],
-                        ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    const crossAxisCount = 2;
+                    const spacing = 12.0;
+                    final tileWidth = (constraints.maxWidth - spacing * (crossAxisCount + 1)) / crossAxisCount;
+                    final aspectRatio = tileWidth / 150;
+                    return GridView.builder(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        crossAxisSpacing: spacing,
+                        mainAxisSpacing: spacing,
+                        childAspectRatio: aspectRatio,
                       ),
+                      itemCount: categories.length,
+                      itemBuilder: (context, index) {
+                        final cat = categories[index];
+                        final groupLabel = _deriveGroupFromName(cat.name);
+                        return LongPressDraggable<int>(
+                          data: index,
+                          onDragStarted: () => setState(() => _draggingIndex = index),
+                          onDraggableCanceled: (_, __) => setState(() => _draggingIndex = null),
+                          onDragEnd: (_) => setState(() => _draggingIndex = null),
+                          feedback: Material(
+                            color: Colors.transparent,
+                            child: SizedBox(
+                              width: tileWidth,
+                              child: _categoryCard(cat, groupLabel: groupLabel, highlight: true),
+                            ),
+                          ),
+                          childWhenDragging: Opacity(
+                            opacity: 0.35,
+                            child: _categoryCard(cat, groupLabel: groupLabel),
+                          ),
+                          child: DragTarget<int>(
+                            onWillAccept: (from) => from != null && from != index,
+                            onAccept: (from) async {
+                              final updated = [...categories];
+                              var insertIndex = index;
+                              if (from < insertIndex) {
+                                insertIndex -= 1;
+                              }
+                              final item = updated.removeAt(from);
+                              updated.insert(insertIndex, item);
+                              await widget.controller.reorderCategories(updated);
+                              setState(() => _draggingIndex = null);
+                            },
+                            builder: (context, candidate, rejected) {
+                              final highlight = candidate.isNotEmpty || _draggingIndex == index;
+                              return _categoryCard(cat, groupLabel: groupLabel, highlight: highlight);
+                            },
+                          ),
+                        );
+                      },
                     );
                   },
                 ),
@@ -2215,19 +2325,76 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     );
   }
 
+  Widget _categoryCard(CategoryModel cat, {required String groupLabel, bool highlight = false}) {
+    final resolvedGroup = groupLabel.isEmpty ? '未分组' : groupLabel;
+    final theme = Theme.of(context);
+    return Card(
+      elevation: highlight ? 3 : 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: cat.color.withOpacity(highlight ? 0.45 : 0.25)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  backgroundColor: cat.color.withOpacity(0.12),
+                  child: Icon(cat.iconData, color: cat.color),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(cat.name, style: const TextStyle(fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 2),
+                      Text(
+                        resolvedGroup,
+                        style: theme.textTheme.bodySmall,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: cat.enabled,
+                  onChanged: (val) => widget.controller.toggleCategory(cat.id, val),
+                ),
+              ],
+            ),
+            const Spacer(),
+            Row(
+              children: [
+                Text('顺序 ${cat.order}', style: theme.textTheme.bodySmall),
+                const Spacer(),
+                IconButton(
+                  tooltip: '编辑',
+                  icon: const Icon(Icons.edit),
+                  onPressed: () => _showCategoryEditor(existing: cat),
+                ),
+                IconButton(
+                  tooltip: '停用',
+                  icon: const Icon(Icons.archive_outlined),
+                  onPressed: () => widget.controller.toggleCategory(cat.id, false),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _showCategoryEditor({CategoryModel? existing}) async {
     final nameController = TextEditingController(text: existing?.name ?? '');
-    final groupController = TextEditingController(text: existing?.group ?? '');
     Color color = existing?.color ?? _palette.first;
     IconData icon = existing?.iconData ?? _iconOptions.first;
-    bool groupEdited = (existing?.group.isNotEmpty ?? false);
-    bool updatingGroupText = false;
-    if (!groupEdited) {
-      final derived = _deriveGroupFromName(nameController.text);
-      if (derived.isNotEmpty) {
-        groupController.text = derived;
-      }
-    }
+    String derivedGroup = _deriveGroupFromName(nameController.text);
     bool enabled = existing?.enabled ?? true;
 
     final confirmed = await showDialog<bool>(
@@ -2242,35 +2409,23 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                 children: [
                   TextField(
                     controller: nameController,
-                    decoration: const InputDecoration(labelText: '名称'),
+                    decoration: const InputDecoration(
+                      labelText: '名称',
+                      helperText: '使用“群组.子类”自动分组，例如：睡眠.午睡',
+                    ),
                     onChanged: (value) {
-                      final derived = _deriveGroupFromName(value);
-                      if (derived.isEmpty && groupEdited && groupController.text.trim().isNotEmpty) {
-                        return;
-                      }
-                      updatingGroupText = true;
                       setDialogState(() {
-                        groupController.text = derived;
-                        if (derived.isNotEmpty) {
-                          groupEdited = false;
-                        }
+                        derivedGroup = _deriveGroupFromName(value);
                       });
-                      updatingGroupText = false;
                     },
                   ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: groupController,
-                    decoration: const InputDecoration(
-                      labelText: '分组/群组名',
-                      helperText: '名称含“.”自动解析群组，例：娱乐.上网探究',
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '当前群组: ${derivedGroup.isEmpty ? '未分组' : derivedGroup}',
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    onChanged: (_) {
-                      if (updatingGroupText) return;
-                      setDialogState(() {
-                        groupEdited = groupController.text.trim().isNotEmpty;
-                      });
-                    },
                   ),
                   const SizedBox(height: 12),
                   Wrap(
@@ -2297,27 +2452,24 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                         .toList(),
                   ),
                   const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: DropdownButton<IconData>(
-                      isExpanded: true,
-                      value: icon,
-                      items: _buildIconOptions(icon)
-                          .map(
-                            (opt) => DropdownMenuItem(
-                              value: opt,
-                              child: Row(
-                                children: [
-                                  Icon(opt),
-                                  const SizedBox(width: 8),
-                                  Text(opt.codePoint.toString()),
-                                ],
-                              ),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) => setDialogState(() => icon = value ?? icon),
-                    ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('图标', style: Theme.of(context).textTheme.titleSmall),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _buildIconOptions(icon)
+                        .map(
+                          (opt) => ChoiceChip(
+                            label: Icon(opt, color: opt == icon ? Theme.of(context).colorScheme.onPrimary : null),
+                            selected: opt == icon,
+                            selectedColor: Theme.of(context).colorScheme.primary,
+                            onSelected: (_) => setDialogState(() => icon = opt),
+                          ),
+                        )
+                        .toList(),
                   ),
                   SwitchListTile(
                     title: const Text('启用'),
@@ -2344,8 +2496,7 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
       _showSnack('名称不能为空');
       return;
     }
-    final derivedGroup = _deriveGroupFromName(name);
-    final resolvedGroup = derivedGroup.isNotEmpty ? derivedGroup : groupController.text.trim();
+    final parsedGroup = _deriveGroupFromName(name);
     final id = existing?.id ?? _buildCategoryId(name);
     final updated = CategoryModel(
       id: id,
@@ -2354,7 +2505,7 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
       colorHex: colorToHex(color),
       order: existing?.order ?? widget.controller.categories.length,
       enabled: enabled,
-      group: resolvedGroup,
+      group: parsedGroup,
     );
     await widget.controller.addOrUpdateCategory(updated);
   }

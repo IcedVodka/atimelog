@@ -348,6 +348,26 @@ class TimeTrackingController extends ChangeNotifier {
     );
   }
 
+  Future<void> updateRecordWithSync({
+    required ActivityRecord record,
+    required DateTime newStart,
+    required DateTime newEnd,
+    required String note,
+    bool syncGroupNotes = false,
+  }) async {
+    final resolved = _resolveNote(record.categoryId, note);
+    await _storage.updateRecord(
+      date: record.startTime,
+      recordId: record.id,
+      newStart: newStart,
+      newEnd: newEnd,
+      note: resolved,
+    );
+    if (syncGroupNotes) {
+      await _syncGroupNotes(record, resolved);
+    }
+  }
+
   Future<void> deleteRecord(DateTime date, String recordId) {
     return _storage.deleteRecord(date, recordId);
   }
@@ -529,7 +549,40 @@ class TimeTrackingController extends ChangeNotifier {
       return trimmed;
     }
     final category = findCategory(categoryId);
-    return category?.name ?? '未命名任务';
+    if (category != null) {
+      return category.name;
+    }
+    final fallback = categoryId.trim().isEmpty ? '未命名' : categoryId.trim();
+    return '其他.$fallback';
+  }
+
+  Future<void> _syncGroupNotes(ActivityRecord origin, String note) async {
+    final resolved = _resolveNote(origin.categoryId, note);
+    final rangeStart = origin.startTime.subtract(const Duration(days: 2));
+    final rangeEnd = origin.endTime.add(const Duration(days: 2));
+    final records = await _storage.loadRangeRecords(rangeStart, rangeEnd);
+    for (final item in records) {
+      if (item.groupId != origin.groupId || item.id == origin.id) {
+        continue;
+      }
+      final closeToOrigin = item.isCrossDaySplit ||
+          origin.isCrossDaySplit ||
+          isSameDay(item.startTime, origin.startTime) ||
+          item.startTime.difference(origin.startTime).inHours.abs() <= 30;
+      if (!closeToOrigin) {
+        continue;
+      }
+      if (item.note == resolved) {
+        continue;
+      }
+      await _storage.updateRecord(
+        date: item.startTime,
+        recordId: item.id,
+        newStart: item.startTime,
+        newEnd: item.endTime,
+        note: resolved,
+      );
+    }
   }
 
   @override

@@ -5,44 +5,91 @@ Phase 2 (Refinement & UI) 需求开发文档.md的需求目前的代码已基本
 ## 修正目标
 
 ### 活动页面
-正在记录的活动修改记录内容还要点一下保存，删去保存，直接保存就好。
-功能按钮里面的「移除」这两个字不对，统一改成「归档保存」。
-手动补录的时候，目前只能选择一个日期，这有问题，应该是起始和终止都能选择日期。
+分类网格太大了，分类网格小一点，每行可供选择活动多一些。
+手动补录的时候，选择不同的活动，记录内容不会同步改变，这是个bug，要修改。
 
 ### 分类管理界面
-修改通勤选项会软件直接报错冒红，报错原因如图
-![alt text](image.png)
-可能其他分类也会有类似bug，详细排查是什么问题并修复
+重构目前的组逻辑，每个分类只有一个叫名称的名字，没有组名字，组逻辑是暗含在名称格式里面的。
+除了午睡外，目前的活动保持名字，上网探究，刷视频，通勤等等。午睡重命名为睡眠.午睡，睡眠.午睡在存储上是一个和上网探究和睡眠同等地位的活动，只是在统计页面展示时，如果勾选了合并组，合并到睡眠去展示，希望这个例子能让你知道我所构想的组逻辑。
 
-群组功能不如预期，拿娱乐.上网探究举例，应该是先有一个娱乐的活动事件，然后娱乐.上网探究在存储活动的地位上和娱乐相当，这样设计只是为了之后的合并展示。群组功能不需要额外设置，根据名字自动配置就好，格式是xx.yyy。
+分类管理界面一行放一个中间空太多太单调不美观，改为一行放两个。
+
+颜色和图标还是不够多，想想有什么办法能显著增加可选择颜色和图标。
 
 ### 统计页面
 
-时间线和饼图的「合并群组」的开关合并，和时间线的合并时间暂停片段开关一起放到顶部的「统计与历史」旁边
+如果查询到json数据里面有活动的名称没有定义，展示的时候以其他.名称展示，就是归类到「其他」这个隐含的组。
 
 #### 时间线
 
-时间线下的几个选项的排序应该是 
-左侧：最近24小时，指定日期，自定义 右侧：搜索栏 
-搜索栏和选项位于同一水平
+时间线展示每个活动的时候，加黑加粗显示活动标题，活动标题就是分类名称注意不是记录内容。
+活动列表展示的东西总计时间，单列时长，起止时间，记录内容字太少了，而且一行一列右半边全是空的，可以琢磨琢磨怎么样展示更加美观。
 
-自定义模式下时间范围的数字显示太小了，显示大一点
-
-时间线下的活动展示详细信息要点击才能完全显示，去掉这个多余动作，直接显示全部信息，右侧是编辑和删除选项，删除要用户确认防止误触。
-
-时间线下的活动展示从上到下的排序顺序应该是时间又新到旧，展示的时候同一天的放到一起并显示月份日期，周几
-比如：
-十二月 10，星期三
-活动1
-活动2 
----
-
-十二月 09，星期二
-活动3
+有一个bug需要修复，如果一个活动是跨天的，因为存储问题，活动会被分成到两天里，但是记录内容的修改并不会同步修改，这个bug要修复。
 
 #### 饼图
-选项排序顺序应该是 最近24小时 本日 本周 本月 自定义
+时间范围的底下分列的活动数据字体大一些，太小了。
 
-显示的时间范围，活动时长数据太小了不好看，显示大一点，活动时长数据除了显示时长还要显示百分比。
+时间范围和底下分列的活动数据中间那个灰色的框删掉，不需要。
 
-饼图能不能做成动态的，就是鼠标移动或者点击的某一部分的时候显示更多具体的信息比如具体的百比分比，总时间。
+底下分列的活动数据一排过去，有些丑，想办法怎么美化一下。
+
+## 运行记录（可能包含报错信息）
+
+gml-cwl@gmlrobot:~/code2/atimelog_demo$ flutter run -d linux 
+Launching lib/main.dart on Linux in debug mode...
+Building Linux application...                                           
+✓ Built build/linux/x64/debug/bundle/atimelog_demo
+Syncing files to device Linux...                                    40ms
+
+Flutter run key commands.
+r Hot reload. 🔥🔥🔥
+R Hot restart.
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+A Dart VM Service on Linux is available at: http://127.0.0.1:38267/R7OMlBfH6-E=/
+The Flutter DevTools debugger and profiler on Linux is available at:
+http://127.0.0.1:38267/R7OMlBfH6-E=/devtools/?uri=ws://127.0.0.1:38267/R7OMlBfH6
+-E=/ws
+
+══╡ EXCEPTION CAUGHT BY ANIMATION LIBRARY
+╞═════════════════════════════════════════════════════════
+The following assertion was thrown while notifying status listeners for
+AnimationController:
+The provided ScrollController is attached to more than one ScrollPosition.
+The Scrollbar requires a single ScrollPosition in order to be painted.
+When the scrollbar is interactive, the associated ScrollController must only
+have one ScrollPosition
+attached.
+The provided ScrollController cannot be shared by multiple ScrollView widgets.
+
+When the exception was thrown, this was the stack:
+#0      RawScrollbarState._debugCheckHasValidScrollPosition.<anonymous closure>
+(package:flutter/src/widgets/scrollbar.dart:1532:9)
+#1      RawScrollbarState._debugCheckHasValidScrollPosition
+(package:flutter/src/widgets/scrollbar.dart:1560:6)
+#2      RawScrollbarState._validateInteractions
+(package:flutter/src/widgets/scrollbar.dart:1467:14)
+#3      AnimationLocalStatusListenersMixin.notifyStatusListeners
+(package:flutter/src/animation/listener_helpers.dart:242:19)
+#4      AnimationController._checkStatusChanged
+(package:flutter/src/animation/animation_controller.dart:941:7)
+#5      AnimationController._startSimulation
+(package:flutter/src/animation/animation_controller.dart:874:5)
+#6      AnimationController._animateToInternal
+(package:flutter/src/animation/animation_controller.dart:687:12)
+#7      AnimationController.reverse
+(package:flutter/src/animation/animation_controller.dart:521:12)
+#8      RawScrollbarState._maybeStartFadeoutTimer.<anonymous closure>
+(package:flutter/src/widgets/scrollbar.dart:1613:37)
+#12     _RawReceivePort._handleMessage
+(dart:isolate-patch/isolate_patch.dart:193:12)
+(elided 3 frames from class _Timer and dart:async-patch)
+
+The AnimationController notifying status listeners was:
+  AnimationController#e3da8(◀ 1.000)
+════════════════════════════════════════════════════════════════════════════════
+════════════════════

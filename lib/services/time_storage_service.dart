@@ -214,6 +214,7 @@ class TimeStorageService {
 
     final list = rawItems
         .map((e) => CategoryModel.fromJson(e as Map<String, dynamic>))
+        .map(_normalizeCategory)
         .toList();
     if (list.isEmpty) {
       final defaults = _defaultCategories();
@@ -260,15 +261,31 @@ class TimeStorageService {
     return File(p.join(config.path, 'settings.json'));
   }
 
+  CategoryModel _normalizeCategory(CategoryModel category) {
+    if (category.id == 'nap' && category.name == '午睡') {
+      return category.copyWith(name: '睡眠.午睡', group: '睡眠');
+    }
+    if (category.id == 'web' && category.name == '上网探索') {
+      return category.copyWith(name: '上网探究');
+    }
+    if (category.name.contains('.')) {
+      final derivedGroup = category.name.split('.').first.trim();
+      if (derivedGroup.isNotEmpty && category.group != derivedGroup) {
+        return category.copyWith(group: derivedGroup);
+      }
+    }
+    return category;
+  }
+
   List<CategoryModel> _defaultCategories() {
     return [
       CategoryModel(
         id: 'web',
-        name: '上网探索',
+        name: '上网探究',
         iconCode: Icons.computer.codePoint,
         colorHex: '#2196F3',
         order: 1,
-        group: '娱乐',
+        group: '',
       ),
       CategoryModel(
         id: 'sleep',
@@ -276,15 +293,15 @@ class TimeStorageService {
         iconCode: Icons.hotel_outlined.codePoint,
         colorHex: '#8E44AD',
         order: 2,
-        group: '休息',
+        group: '',
       ),
       CategoryModel(
         id: 'nap',
-        name: '午睡',
+        name: '睡眠.午睡',
         iconCode: Icons.wb_sunny_outlined.codePoint,
         colorHex: '#FBC02D',
         order: 3,
-        group: '休息',
+        group: '',
       ),
       CategoryModel(
         id: 'commute',
@@ -292,7 +309,7 @@ class TimeStorageService {
         iconCode: Icons.speed.codePoint,
         colorHex: '#E91E63',
         order: 4,
-        group: '出行',
+        group: '',
       ),
       CategoryModel(
         id: 'video',
@@ -300,7 +317,7 @@ class TimeStorageService {
         iconCode: Icons.movie_filter_outlined.codePoint,
         colorHex: '#00ACC1',
         order: 5,
-        group: '娱乐',
+        group: '',
       ),
       CategoryModel(
         id: 'meal',
@@ -308,7 +325,7 @@ class TimeStorageService {
         iconCode: Icons.restaurant.codePoint,
         colorHex: '#7D6608',
         order: 6,
-        group: '生活',
+        group: '',
       ),
       CategoryModel(
         id: 'sports',
@@ -316,7 +333,7 @@ class TimeStorageService {
         iconCode: Icons.fitness_center.codePoint,
         colorHex: '#1565C0',
         order: 7,
-        group: '健康',
+        group: '',
       ),
       CategoryModel(
         id: 'game',
@@ -324,7 +341,7 @@ class TimeStorageService {
         iconCode: Icons.sports_esports.codePoint,
         colorHex: '#5C6BC0',
         order: 8,
-        group: '娱乐',
+        group: '',
       ),
       CategoryModel(
         id: 'movie',
@@ -332,7 +349,7 @@ class TimeStorageService {
         iconCode: Icons.movie_creation_outlined.codePoint,
         colorHex: '#757575',
         order: 9,
-        group: '娱乐',
+        group: '',
       ),
       CategoryModel(
         id: 'chat',
@@ -340,7 +357,7 @@ class TimeStorageService {
         iconCode: Icons.people.codePoint,
         colorHex: '#F4511E',
         order: 10,
-        group: '社交',
+        group: '',
       ),
       CategoryModel(
         id: 'house',
@@ -348,7 +365,7 @@ class TimeStorageService {
         iconCode: Icons.home.codePoint,
         colorHex: '#7CB342',
         order: 11,
-        group: '生活',
+        group: '',
       ),
       CategoryModel(
         id: 'reading',
@@ -356,7 +373,7 @@ class TimeStorageService {
         iconCode: Icons.menu_book.codePoint,
         colorHex: '#8D6E63',
         order: 12,
-        group: '学习',
+        group: '',
       ),
       CategoryModel(
         id: 'work',
@@ -364,7 +381,7 @@ class TimeStorageService {
         iconCode: Icons.work_outline.codePoint,
         colorHex: '#FF9800',
         order: 13,
-        group: '工作',
+        group: '',
       ),
       CategoryModel(
         id: 'shopping',
@@ -372,7 +389,7 @@ class TimeStorageService {
         iconCode: Icons.shopping_cart.codePoint,
         colorHex: '#455A64',
         order: 14,
-        group: '生活',
+        group: '',
       ),
       CategoryModel(
         id: 'walk',
@@ -380,7 +397,7 @@ class TimeStorageService {
         iconCode: Icons.directions_walk.codePoint,
         colorHex: '#42A5F5',
         order: 15,
-        group: '健康',
+        group: '',
       ),
     ];
   }
