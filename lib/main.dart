@@ -249,6 +249,8 @@ class ActivityTab extends StatefulWidget {
 
 class _ActivityTabState extends State<ActivityTab> {
   String? _selectedCategoryId;
+  bool _savingCurrentNote = false;
+  String? _lastCurrentTempId;
 
   @override
   void initState() {
@@ -260,16 +262,14 @@ class _ActivityTabState extends State<ActivityTab> {
   }
 
   Future<void> _startFromSelected() async {
-    final noteText = widget.noteController.text.trim();
+    const noteText = '';
     final categoryId = _selectedCategoryId;
     if (categoryId == null) {
       _showSnack('暂无分类可用');
       return;
     }
-    final catName = widget.controller.findCategory(categoryId)?.name ?? '未命名任务';
-    final note = noteText.isEmpty ? catName : noteText;
     try {
-      await widget.controller.startNewActivity(categoryId: categoryId, note: note, allowSwitch: true);
+      await widget.controller.startNewActivity(categoryId: categoryId, note: noteText, allowSwitch: true);
     } catch (error) {
       _showSnack(error.toString());
     }
@@ -318,6 +318,175 @@ class _ActivityTabState extends State<ActivityTab> {
     await widget.controller.updateCurrentStartTime(updatedStart);
   }
 
+  Future<void> _handleEditCurrentNote(CurrentActivity current) async {
+    if (_savingCurrentNote) return;
+    setState(() => _savingCurrentNote = true);
+    try {
+      await widget.controller.updateCurrentNote(widget.noteController.text.trim());
+      if (!mounted) return;
+      _showSnack('记录内容已更新');
+    } catch (error) {
+      _showSnack(error.toString());
+    } finally {
+      if (mounted) setState(() => _savingCurrentNote = false);
+    }
+  }
+
+  Future<void> _editRecentContext(RecentContext contextItem) async {
+    final latest = await widget.controller.findLatestRecordForGroup(contextItem.groupId);
+    if (latest == null) {
+      _showSnack('未找到可编辑的历史片段');
+      return;
+    }
+    final category = widget.controller.findCategory(contextItem.categoryId);
+    final noteController = TextEditingController(
+      text: contextItem.note.isNotEmpty ? contextItem.note : (category?.name ?? ''),
+    );
+    DateTime startDate = latest.startTime;
+    DateTime endDate = latest.endTime;
+    TimeOfDay startTime = TimeOfDay.fromDateTime(latest.startTime);
+    TimeOfDay endTime = TimeOfDay.fromDateTime(latest.endTime);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('编辑最近活动'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: noteController,
+                    decoration: const InputDecoration(labelText: '记录内容'),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: startDate,
+                              firstDate: DateTime.now().subtract(const Duration(days: 60)),
+                              lastDate: DateTime.now(),
+                            );
+                            if (picked != null) {
+                              setDialogState(() => startDate = picked);
+                            }
+                          },
+                          icon: const Icon(Icons.calendar_today_outlined),
+                          label: Text(DateFormat('yyyy-MM-dd').format(startDate)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: endDate,
+                              firstDate: DateTime.now().subtract(const Duration(days: 60)),
+                              lastDate: DateTime.now(),
+                            );
+                            if (picked != null) {
+                              setDialogState(() => endDate = picked);
+                            }
+                          },
+                          icon: const Icon(Icons.event),
+                          label: Text(DateFormat('yyyy-MM-dd').format(endDate)),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final picked = await showTimePicker(context: context, initialTime: startTime);
+                            if (picked != null) {
+                              setDialogState(() => startTime = picked);
+                            }
+                          },
+                          icon: const Icon(Icons.play_arrow),
+                          label: Text(startTime.format(context)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final picked = await showTimePicker(context: context, initialTime: endTime);
+                            if (picked != null) {
+                              setDialogState(() => endTime = picked);
+                            }
+                          },
+                          icon: const Icon(Icons.stop),
+                          label: Text(endTime.format(context)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('保存')),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    final newStart = DateTime(
+      startDate.year,
+      startDate.month,
+      startDate.day,
+      startTime.hour,
+      startTime.minute,
+    );
+    final newEnd = DateTime(
+      endDate.year,
+      endDate.month,
+      endDate.day,
+      endTime.hour,
+      endTime.minute,
+    );
+    if (!newStart.isBefore(newEnd)) {
+      _showSnack('结束时间需要晚于开始时间');
+      return;
+    }
+    if (!isSameDay(newStart, latest.startTime)) {
+      _showSnack('暂不支持跨日修改最近活动');
+      return;
+    }
+    if (!isSameDay(newEnd, latest.endTime)) {
+      _showSnack('暂不支持跨日修改最近活动');
+      return;
+    }
+    await widget.controller.updateRecord(
+      date: latest.startTime,
+      recordId: latest.id,
+      newStart: newStart,
+      newEnd: newEnd,
+      note: noteController.text.trim().isEmpty
+          ? (category?.name ?? contextItem.note)
+          : noteController.text.trim(),
+    );
+    await widget.controller.updateRecentNote(contextItem.groupId, noteController.text.trim());
+    setState(() {});
+    _showSnack('已更新最近活动');
+  }
+
   Future<void> showManualDialog([CategoryModel? initialCategory]) async {
     final categories = widget.controller.categories.where((c) => c.enabled).toList();
     if (categories.isEmpty) {
@@ -328,9 +497,7 @@ class _ActivityTabState extends State<ActivityTab> {
     DateTime selectedDate = DateTime.now();
     TimeOfDay start = TimeOfDay.fromDateTime(DateTime.now());
     TimeOfDay end = TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 25)));
-    final noteController = TextEditingController(
-      text: widget.noteController.text.isNotEmpty ? widget.noteController.text : selected.name,
-    );
+    final noteController = TextEditingController(text: selected.name);
 
     final result = await showModalBottomSheet<bool>(
       context: context,
@@ -520,6 +687,8 @@ class _ActivityTabState extends State<ActivityTab> {
 
   Widget _buildActiveCard(CurrentActivity? current) {
     if (current == null) {
+      _lastCurrentTempId = null;
+      widget.noteController.text = '';
       return Card(
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -529,7 +698,7 @@ class _ActivityTabState extends State<ActivityTab> {
               Text('尚未开始', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
               Text(
-                '点击下方分类或输入记录内容开始新任务。',
+                '点击下方分类开始新任务，记录内容默认使用分类名称，可在开始后修改。',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 12),
@@ -545,6 +714,10 @@ class _ActivityTabState extends State<ActivityTab> {
     }
 
     final category = widget.controller.findCategory(current.categoryId);
+    if (_lastCurrentTempId != current.tempId) {
+      _lastCurrentTempId = current.tempId;
+      widget.noteController.text = current.note;
+    }
     return Card(
       elevation: 2,
       child: Padding(
@@ -581,6 +754,24 @@ class _ActivityTabState extends State<ActivityTab> {
                   tooltip: '修改开始时间',
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: widget.noteController,
+              decoration: InputDecoration(
+                labelText: '记录内容',
+                suffixIcon: IconButton(
+                  onPressed: () => _handleEditCurrentNote(current),
+                  icon: _savingCurrentNote
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.save_alt),
+                  tooltip: '保存记录内容',
+                ),
+              ),
             ),
             const SizedBox(height: 16),
             Text(
@@ -628,15 +819,6 @@ class _ActivityTabState extends State<ActivityTab> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('快速开始', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            TextField(
-              controller: widget.noteController,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                labelText: '记录内容',
-                hintText: '例如：编写需求文档',
-              ),
-            ),
             const SizedBox(height: 12),
             Row(
               children: [
@@ -714,6 +896,11 @@ class _ActivityTabState extends State<ActivityTab> {
                     tooltip: '继续',
                   ),
                   IconButton(
+                    onPressed: () => _editRecentContext(item),
+                    icon: const Icon(Icons.edit_note_outlined),
+                    tooltip: '编辑',
+                  ),
+                  IconButton(
                     onPressed: () async => widget.controller.removeRecentContext(item.groupId),
                     icon: const Icon(Icons.delete, color: Colors.redAccent),
                     tooltip: '移除',
@@ -748,13 +935,11 @@ class _ActivityTabState extends State<ActivityTab> {
             return InkWell(
               borderRadius: BorderRadius.circular(12),
               onTap: () async {
-                widget.noteController.text =
-                    widget.noteController.text.trim().isEmpty ? category.name : widget.noteController.text;
+                const noteText = '';
                 try {
                   await widget.controller.switchToCategory(
                     categoryId: category.id,
-                    note:
-                        widget.noteController.text.trim().isEmpty ? category.name : widget.noteController.text.trim(),
+                    note: noteText,
                   );
                 } catch (error) {
                   _showSnack(error.toString());
@@ -794,7 +979,8 @@ class _ActivityTabState extends State<ActivityTab> {
   }
 }
 
-enum StatsRange { today, week, month }
+enum TimelineRangeMode { day, last24h, custom }
+enum StatsRange { today, week, month, last24h, custom }
 
 class StatsTab extends StatefulWidget {
   const StatsTab({super.key, required this.controller});
@@ -806,8 +992,15 @@ class StatsTab extends StatefulWidget {
 }
 
 class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin {
-  DateTime _selectedDate = DateTime.now();
+  TimelineRangeMode _timelineMode = TimelineRangeMode.day;
+  DateTime _timelineDate = DateTime.now();
+  DateTimeRange? _timelineCustomRange;
+  String _timelineKeyword = '';
+  bool _mergePause = true;
+  bool _groupMerge = false;
+
   StatsRange _range = StatsRange.today;
+  DateTimeRange? _pieCustomRange;
 
   @override
   Widget build(BuildContext context) {
@@ -854,38 +1047,205 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
       children: [
         Padding(
           padding: const EdgeInsets.all(12),
-          child: Row(
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              IconButton(
-                onPressed: () => setState(() => _selectedDate = _selectedDate.subtract(const Duration(days: 1))),
-                icon: const Icon(Icons.chevron_left),
+              ChoiceChip(
+                label: const Text('指定日期'),
+                selected: _timelineMode == TimelineRangeMode.day,
+                onSelected: (_) => setState(() => _timelineMode = TimelineRangeMode.day),
               ),
-              TextButton(
-                onPressed: () async {
-                  final picked = await showDatePicker(
-                    context: context,
-                    initialDate: _selectedDate,
-                    firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                    lastDate: DateTime.now(),
-                  );
-                  if (picked != null) {
-                    setState(() => _selectedDate = picked);
-                  }
-                },
-                child: Text(DateFormat('yyyy-MM-dd').format(_selectedDate)),
+              ChoiceChip(
+                label: const Text('最近24小时'),
+                selected: _timelineMode == TimelineRangeMode.last24h,
+                onSelected: (_) => setState(() => _timelineMode = TimelineRangeMode.last24h),
               ),
-              IconButton(
-                onPressed: _selectedDate.isBefore(DateTime.now())
-                    ? () => setState(() => _selectedDate = _selectedDate.add(const Duration(days: 1)))
-                    : null,
-                icon: const Icon(Icons.chevron_right),
+              ChoiceChip(
+                label: const Text('自定义范围'),
+                selected: _timelineMode == TimelineRangeMode.custom,
+                onSelected: (_) => setState(() => _timelineMode = TimelineRangeMode.custom),
+              ),
+            ],
+          ),
+        ),
+        if (_timelineMode == TimelineRangeMode.day)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                IconButton(
+                  onPressed: () => setState(() => _timelineDate = _timelineDate.subtract(const Duration(days: 1))),
+                  icon: const Icon(Icons.chevron_left),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _timelineDate,
+                      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                      lastDate: DateTime.now(),
+                    );
+                    if (picked != null) {
+                      setState(() => _timelineDate = picked);
+                    }
+                  },
+                  child: Text(DateFormat('yyyy-MM-dd').format(_timelineDate)),
+                ),
+                IconButton(
+                  onPressed: _timelineDate.isBefore(DateTime.now())
+                      ? () => setState(() => _timelineDate = _timelineDate.add(const Duration(days: 1)))
+                      : null,
+                  icon: const Icon(Icons.chevron_right),
+                ),
+              ],
+            ),
+          ),
+        if (_timelineMode == TimelineRangeMode.custom)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Builder(
+              builder: (context) {
+                final now = DateTime.now();
+                final custom = _timelineCustomRange ??
+                    DateTimeRange(
+                      start: now.subtract(const Duration(days: 1)),
+                      end: now,
+                    );
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${DateFormat('MM-dd HH:mm').format(custom.start)} - ${DateFormat('MM-dd HH:mm').format(custom.end)}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        TextButton.icon(
+                          onPressed: () async {
+                            final picked = await showDateRangePicker(
+                              context: context,
+                              initialDateRange: custom,
+                              firstDate: now.subtract(const Duration(days: 365)),
+                              lastDate: now,
+                            );
+                            if (picked != null) {
+                              setState(() {
+                                _timelineCustomRange = DateTimeRange(
+                                  start: DateTime(picked.start.year, picked.start.month, picked.start.day),
+                                  end: DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59),
+                                );
+                              });
+                            }
+                          },
+                          icon: const Icon(Icons.calendar_month_outlined),
+                          label: const Text('日期范围'),
+                        ),
+                        TextButton.icon(
+                          onPressed: () async {
+                            final pickedDate = await showDatePicker(
+                              context: context,
+                              initialDate: custom.start,
+                              firstDate: now.subtract(const Duration(days: 365)),
+                              lastDate: now,
+                            );
+                            if (pickedDate == null) return;
+                            final pickedTime = await showTimePicker(
+                              context: context,
+                              initialTime: TimeOfDay.fromDateTime(custom.start),
+                            );
+                            final time = pickedTime ?? TimeOfDay.fromDateTime(custom.start);
+                            final updated = DateTime(
+                              pickedDate.year,
+                              pickedDate.month,
+                              pickedDate.day,
+                              time.hour,
+                              time.minute,
+                            );
+                            if (updated.isAfter(custom.end)) {
+                              _showSnack('开始时间需早于结束时间');
+                              return;
+                            }
+                            setState(() {
+                              _timelineCustomRange = DateTimeRange(start: updated, end: custom.end);
+                            });
+                          },
+                          icon: const Icon(Icons.play_circle_outline),
+                          label: const Text('起始时间'),
+                        ),
+                        TextButton.icon(
+                          onPressed: () async {
+                            final pickedDate = await showDatePicker(
+                              context: context,
+                              initialDate: custom.end,
+                              firstDate: now.subtract(const Duration(days: 365)),
+                              lastDate: now,
+                            );
+                            if (pickedDate == null) return;
+                            final pickedTime = await showTimePicker(
+                              context: context,
+                              initialTime: TimeOfDay.fromDateTime(custom.end),
+                            );
+                            final time = pickedTime ?? TimeOfDay.fromDateTime(custom.end);
+                            final updated = DateTime(
+                              pickedDate.year,
+                              pickedDate.month,
+                              pickedDate.day,
+                              time.hour,
+                              time.minute,
+                            );
+                            if (!updated.isAfter(custom.start)) {
+                              _showSnack('结束时间需要晚于开始时间');
+                              return;
+                            }
+                            setState(() {
+                              _timelineCustomRange = DateTimeRange(start: custom.start, end: updated);
+                            });
+                          },
+                          icon: const Icon(Icons.stop_circle_outlined),
+                          label: const Text('结束时间'),
+                        ),
+                      ],
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: TextField(
+            decoration: const InputDecoration(
+              labelText: '搜索记录内容 / 分类',
+              prefixIcon: Icon(Icons.search),
+            ),
+            onChanged: (value) => setState(() => _timelineKeyword = value),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: Wrap(
+            spacing: 12,
+            children: [
+              FilterChip(
+                label: const Text('合并暂停片段'),
+                selected: _mergePause,
+                onSelected: (val) => setState(() => _mergePause = val),
+              ),
+              FilterChip(
+                label: const Text('合并群组'),
+                selected: _groupMerge,
+                onSelected: (val) => setState(() => _groupMerge = val),
               ),
             ],
           ),
         ),
         Expanded(
-          child: FutureBuilder<List<AggregatedTimelineGroup>>(
-            future: widget.controller.aggregateDay(_selectedDate),
+          child: FutureBuilder<List<_TimelineGroupDisplay>>(
+            future: _loadTimelineGroups(),
             builder: (context, snapshot) {
               if (snapshot.hasError) {
                 return Center(child: Text('加载失败: ${snapshot.error}'));
@@ -893,15 +1253,15 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
               if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
-              final data = snapshot.data!;
-              if (data.isEmpty) {
-                return const Center(child: Text('当天暂无记录'));
+              final groups = snapshot.data!;
+              if (groups.isEmpty) {
+                return const Center(child: Text('当前范围暂无记录'));
               }
               return ListView.builder(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
-                itemCount: data.length,
+                itemCount: groups.length,
                 itemBuilder: (context, index) {
-                  final group = data[index];
+                  final group = groups[index];
                   final category = widget.controller.findCategory(group.categoryId);
                   final color = category?.color ?? Theme.of(context).colorScheme.primary;
                   return Card(
@@ -910,9 +1270,9 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
                         backgroundColor: color.withOpacity(0.15),
                         child: Icon(category?.iconData ?? Icons.category, color: color),
                       ),
-                      title: Text(group.note),
+                      title: Text(group.title),
                       subtitle: Text(
-                        '${category?.name ?? group.categoryId} · 总计 ${_formatDuration(group.totalDuration)}',
+                        '${group.groupLabel} · 总计 ${_formatDuration(group.totalDuration)}',
                       ),
                       children: group.segments
                           .map(
@@ -953,7 +1313,7 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
   }
 
   Widget _buildPie() {
-    final dateRange = _resolveRange();
+    final dateRange = _resolvePieRange();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -977,9 +1337,62 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
                 selected: _range == StatsRange.month,
                 onSelected: (_) => setState(() => _range = StatsRange.month),
               ),
+              ChoiceChip(
+                label: const Text('最近24小时'),
+                selected: _range == StatsRange.last24h,
+                onSelected: (_) => setState(() => _range = StatsRange.last24h),
+              ),
+              ChoiceChip(
+                label: const Text('自定义'),
+                selected: _range == StatsRange.custom,
+                onSelected: (_) => setState(() => _range = StatsRange.custom),
+              ),
+              FilterChip(
+                label: const Text('合并群组'),
+                selected: _groupMerge,
+                onSelected: (val) => setState(() => _groupMerge = val),
+              ),
             ],
           ),
         ),
+        if (_range == StatsRange.custom)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _pieCustomRange == null
+                        ? '请选择统计范围'
+                        : '${DateFormat('MM-dd').format(_pieCustomRange!.start)} - ${DateFormat('MM-dd').format(_pieCustomRange!.end)}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: () async {
+                    final now = DateTime.now();
+                    final picked = await showDateRangePicker(
+                      context: context,
+                      initialDateRange: _pieCustomRange ??
+                          DateTimeRange(start: now.subtract(const Duration(days: 6)), end: now),
+                      firstDate: now.subtract(const Duration(days: 365)),
+                      lastDate: now,
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _pieCustomRange = DateTimeRange(
+                          start: DateTime(picked.start.year, picked.start.month, picked.start.day),
+                          end: DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59),
+                        );
+                      });
+                    }
+                  },
+                  icon: const Icon(Icons.calendar_month_outlined),
+                  label: const Text('选择范围'),
+                ),
+              ],
+            ),
+          ),
         Expanded(
           child: FutureBuilder<Map<String, Duration>>(
             future: widget.controller.categoryDurations(dateRange.$1, dateRange.$2),
@@ -991,14 +1404,7 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
                 return const Center(child: CircularProgressIndicator());
               }
               final totals = snapshot.data!;
-              final slices = totals.entries.map((entry) {
-                final category = widget.controller.findCategory(entry.key);
-                return PieSliceData(
-                  label: category?.name ?? entry.key,
-                  value: entry.value.inSeconds.toDouble(),
-                  color: category?.color ?? Colors.grey,
-                );
-              }).toList();
+              final slices = _buildPieSlices(totals);
               final totalSeconds = totals.values.fold<int>(0, (prev, dur) => prev + dur.inSeconds);
               return Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
@@ -1053,24 +1459,37 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
     );
   }
 
-  (DateTime, DateTime) _resolveRange() {
+  (DateTime, DateTime) _resolvePieRange() {
     final now = DateTime.now();
     switch (_range) {
       case StatsRange.today:
         final start = DateTime(now.year, now.month, now.day);
-        return (start, start);
+        final end = start.add(const Duration(days: 1)).subtract(const Duration(milliseconds: 1));
+        return (start, end);
       case StatsRange.week:
         final start = now.subtract(Duration(days: now.weekday - 1));
         final rangeStart = DateTime(start.year, start.month, start.day);
-        return (rangeStart, DateTime(now.year, now.month, now.day));
+        final rangeEnd = DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
+        return (rangeStart, rangeEnd);
       case StatsRange.month:
         final start = DateTime(now.year, now.month, 1);
-        return (start, DateTime(now.year, now.month, now.day));
+        final end = DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
+        return (start, end);
+      case StatsRange.last24h:
+        final end = now;
+        final start = now.subtract(const Duration(hours: 24));
+        return (start, end);
+      case StatsRange.custom:
+        final fallback = DateTimeRange(start: now.subtract(const Duration(days: 6)), end: now);
+        final picked = _pieCustomRange ?? fallback;
+        return (picked.start, picked.end);
     }
   }
 
   Future<void> _editRecord(ActivityRecord record) async {
     final noteController = TextEditingController(text: record.note);
+    DateTime startDate = record.startTime;
+    DateTime endDate = record.endTime;
     TimeOfDay start = TimeOfDay.fromDateTime(record.startTime);
     TimeOfDay end = TimeOfDay.fromDateTime(record.endTime);
 
@@ -1083,6 +1502,45 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton.icon(
+                        onPressed: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: startDate,
+                            firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                            lastDate: DateTime.now(),
+                          );
+                          if (picked != null) {
+                            setDialogState(() => startDate = picked);
+                          }
+                        },
+                        icon: const Icon(Icons.calendar_today_outlined),
+                        label: Text(DateFormat('yyyy-MM-dd').format(startDate)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextButton.icon(
+                        onPressed: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: endDate,
+                            firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                            lastDate: DateTime.now(),
+                          );
+                          if (picked != null) {
+                            setDialogState(() => endDate = picked);
+                          }
+                        },
+                        icon: const Icon(Icons.event),
+                        label: Text(DateFormat('yyyy-MM-dd').format(endDate)),
+                      ),
+                    ),
+                  ],
+                ),
                 TextButton.icon(
                   onPressed: () async {
                     final picked = await showTimePicker(context: context, initialTime: start);
@@ -1122,16 +1580,16 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
       return;
     }
     final startTime = DateTime(
-      record.startTime.year,
-      record.startTime.month,
-      record.startTime.day,
+      startDate.year,
+      startDate.month,
+      startDate.day,
       start.hour,
       start.minute,
     );
     final endTime = DateTime(
-      record.endTime.year,
-      record.endTime.month,
-      record.endTime.day,
+      endDate.year,
+      endDate.month,
+      endDate.day,
       end.hour,
       end.minute,
     );
@@ -1139,12 +1597,20 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
       _showSnack('结束时间需要晚于开始时间');
       return;
     }
+    if (!isSameDay(startTime, record.startTime)) {
+      _showSnack('暂不支持跨日修改，若需跨日请拆分记录');
+      return;
+    }
+    if (!isSameDay(endTime, record.endTime)) {
+      _showSnack('暂不支持跨日修改，若需跨日请拆分记录');
+      return;
+    }
     await widget.controller.updateRecord(
       date: record.startTime,
       recordId: record.id,
       newStart: startTime,
       newEnd: endTime,
-      note: noteController.text.trim(),
+      note: noteController.text.trim().isEmpty ? _resolveNote(record) : noteController.text.trim(),
     );
     final updatedRecords = await widget.controller.loadDayRecords(record.startTime);
     final hasOverlap = widget.controller.hasOverlap(updatedRecords, ignoringId: record.id);
@@ -1182,6 +1648,199 @@ class _StatsTabState extends State<StatsTab> with SingleTickerProviderStateMixin
     }
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
+
+  Future<List<_TimelineGroupDisplay>> _loadTimelineGroups() async {
+    final range = _timelineRange();
+    final records = await widget.controller.loadRangeRecords(range.$1, range.$2);
+    final keyword = _timelineKeyword.trim().toLowerCase();
+
+    bool matchKeyword(ActivityRecord record) {
+      if (keyword.isEmpty) return true;
+      final category = widget.controller.findCategory(record.categoryId);
+      final noteText = record.note.toLowerCase();
+      final catName = category?.name.toLowerCase() ?? '';
+      final groupLabel = _groupLabel(category).toLowerCase();
+      return noteText.contains(keyword) || catName.contains(keyword) || groupLabel.contains(keyword);
+    }
+
+    final filtered = records
+        .where((r) =>
+            !r.startTime.isBefore(range.$1) &&
+            !r.startTime.isAfter(range.$2) &&
+            matchKeyword(r))
+        .toList()
+      ..sort((a, b) => a.startTime.compareTo(b.startTime));
+
+    if (filtered.isEmpty) {
+      return const [];
+    }
+
+    if (_mergePause) {
+      final byGroupId = <String, List<ActivityRecord>>{};
+      for (final record in filtered) {
+        byGroupId.putIfAbsent(record.groupId, () => []).add(record);
+      }
+      final aggregated = byGroupId.entries.map((entry) {
+        final segs = [...entry.value]..sort((a, b) => a.startTime.compareTo(b.startTime));
+        final first = segs.first;
+        return _TimelineGroupDisplay(
+          title: _resolveNote(first),
+          categoryId: first.categoryId,
+          groupLabel: _groupLabel(widget.controller.findCategory(first.categoryId)),
+          segments: segs,
+        );
+      }).toList()
+        ..sort((a, b) => a.start.compareTo(b.start));
+      return _groupMerge ? _mergeByGroupLabel(aggregated) : aggregated;
+    }
+
+    if (_groupMerge) {
+      final byGroupLabel = <String, List<ActivityRecord>>{};
+      for (final record in filtered) {
+        final key = _groupLabel(widget.controller.findCategory(record.categoryId));
+        byGroupLabel.putIfAbsent(key, () => []).add(record);
+      }
+      final grouped = byGroupLabel.entries.map((entry) {
+        final segs = [...entry.value]..sort((a, b) => a.startTime.compareTo(b.startTime));
+        final first = segs.first;
+        return _TimelineGroupDisplay(
+          title: entry.key,
+          categoryId: first.categoryId,
+          groupLabel: entry.key,
+          segments: segs,
+        );
+      }).toList()
+        ..sort((a, b) => a.start.compareTo(b.start));
+      return grouped;
+    }
+
+    return filtered
+        .map(
+          (r) => _TimelineGroupDisplay(
+            title: _resolveNote(r),
+            categoryId: r.categoryId,
+            groupLabel: _groupLabel(widget.controller.findCategory(r.categoryId)),
+            segments: [r],
+          ),
+        )
+        .toList();
+  }
+
+  (DateTime, DateTime) _timelineRange() {
+    final now = DateTime.now();
+    switch (_timelineMode) {
+      case TimelineRangeMode.day:
+        final start = DateTime(_timelineDate.year, _timelineDate.month, _timelineDate.day);
+        final end = start.add(const Duration(days: 1)).subtract(const Duration(milliseconds: 1));
+        return (start, end);
+      case TimelineRangeMode.last24h:
+        final end = now;
+        final start = now.subtract(const Duration(hours: 24));
+        return (start, end);
+      case TimelineRangeMode.custom:
+        final fallback = DateTimeRange(start: now.subtract(const Duration(days: 1)), end: now);
+        final picked = _timelineCustomRange ?? fallback;
+        return (picked.start, picked.end);
+    }
+  }
+
+  List<PieSliceData> _buildPieSlices(Map<String, Duration> totals) {
+    if (!_groupMerge) {
+      return totals.entries.map((entry) {
+        final category = widget.controller.findCategory(entry.key);
+        return PieSliceData(
+          label: category?.name ?? entry.key,
+          value: entry.value.inSeconds.toDouble(),
+          color: category?.color ?? Colors.grey,
+        );
+      }).toList();
+    }
+
+    final groupDurations = <String, int>{};
+    totals.forEach((catId, duration) {
+      final category = widget.controller.findCategory(catId);
+      final key = _groupLabel(category);
+      groupDurations.update(key, (value) => value + duration.inSeconds, ifAbsent: () => duration.inSeconds);
+    });
+
+    return groupDurations.entries.map((entry) {
+      final sampleCategory = widget.controller.categories.firstWhere(
+        (c) => _groupLabel(c) == entry.key,
+        orElse: () => widget.controller.categories.isNotEmpty
+            ? widget.controller.categories.first
+            : CategoryModel(
+                id: 'placeholder',
+                name: '未分组',
+                iconCode: Icons.category_outlined.codePoint,
+                colorHex: '#9E9E9E',
+                order: 0,
+              ),
+      );
+      return PieSliceData(
+        label: entry.key,
+        value: entry.value.toDouble(),
+        color: sampleCategory.color,
+      );
+    }).toList();
+  }
+
+  String _resolveNote(ActivityRecord record) {
+    if (record.note.isNotEmpty) return record.note;
+    final category = widget.controller.findCategory(record.categoryId);
+    return category?.name ?? record.categoryId;
+  }
+
+  String _groupLabel(CategoryModel? category) {
+    if (category == null) return '未分组';
+    if (category.group.trim().isNotEmpty) {
+      return category.group.trim();
+    }
+    if (category.name.contains('.')) {
+      return category.name.split('.').first;
+    }
+    return category.name;
+  }
+
+  List<_TimelineGroupDisplay> _mergeByGroupLabel(List<_TimelineGroupDisplay> items) {
+    final map = <String, List<ActivityRecord>>{};
+    for (final item in items) {
+      map.putIfAbsent(item.groupLabel, () => []).addAll(item.segments);
+    }
+    final result = map.entries.map((entry) {
+      final segs = [...entry.value]..sort((a, b) => a.startTime.compareTo(b.startTime));
+      final first = segs.first;
+      return _TimelineGroupDisplay(
+        title: entry.key,
+        categoryId: first.categoryId,
+        groupLabel: entry.key,
+        segments: segs,
+      );
+    }).toList()
+      ..sort((a, b) => a.start.compareTo(b.start));
+    return result;
+  }
+}
+
+class _TimelineGroupDisplay {
+  _TimelineGroupDisplay({
+    required this.title,
+    required this.categoryId,
+    required this.groupLabel,
+    required this.segments,
+  });
+
+  final String title;
+  final String categoryId;
+  final String groupLabel;
+  final List<ActivityRecord> segments;
+
+  Duration get totalDuration {
+    final seconds = segments.fold<int>(0, (prev, e) => prev + e.durationSeconds);
+    return Duration(seconds: seconds);
+  }
+
+  DateTime get start => segments.first.startTime;
+  DateTime get end => segments.last.endTime;
 }
 
 class CategoryManageTab extends StatefulWidget {
@@ -1195,14 +1854,26 @@ class CategoryManageTab extends StatefulWidget {
 
 class _CategoryManageTabState extends State<CategoryManageTab> {
   final List<Color> _palette = const [
-    Color(0xFF2196F3),
-    Color(0xFF8E44AD),
+    Color(0xFF1565C0), // 蓝
+    Color(0xFF1E88E5),
+    Color(0xFF90CAF9),
+    Color(0xFF6A1B9A), // 紫
+    Color(0xFF8E24AA),
+    Color(0xFFBA68C8),
+    Color(0xFFC2185B), // 粉
     Color(0xFFE91E63),
-    Color(0xFF00ACC1),
-    Color(0xFF7CB342),
-    Color(0xFFFF9800),
-    Color(0xFF455A64),
-    Color(0xFFFBC02D),
+    Color(0xFFFF80AB),
+    Color(0xFF00897B), // 青
+    Color(0xFF26A69A),
+    Color(0xFF26C6DA),
+    Color(0xFF2E7D32), // 绿
+    Color(0xFF43A047),
+    Color(0xFF81C784),
+    Color(0xFFFFB300), // 黄/橙
+    Color(0xFFFFD54F),
+    Color(0xFFFF8F00),
+    Color(0xFF6D4C41), // 棕
+    Color(0xFF455A64), // 深灰
   ];
   final List<IconData> _iconOptions = const [
     Icons.computer,
@@ -1216,6 +1887,17 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     Icons.shopping_cart,
     Icons.work_outline,
     Icons.fastfood,
+    Icons.code,
+    Icons.brush_outlined,
+    Icons.music_note,
+    Icons.pets,
+    Icons.child_friendly,
+    Icons.school,
+    Icons.car_rental,
+    Icons.self_improvement,
+    Icons.travel_explore,
+    Icons.coffee,
+    Icons.nightlight_round,
   ];
 
   @override
@@ -1320,7 +2002,10 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                   const SizedBox(height: 8),
                   TextField(
                     controller: groupController,
-                    decoration: const InputDecoration(labelText: '分组'),
+                    decoration: const InputDecoration(
+                      labelText: '分组/群组名',
+                      helperText: '可用“群组.子类”命名，例：睡眠.午睡',
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Wrap(

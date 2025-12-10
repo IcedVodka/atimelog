@@ -109,7 +109,7 @@ class TimeTrackingController extends ChangeNotifier {
     }
     await _startActivity(
       categoryId: categoryId,
-      note: note.isEmpty ? (findCategory(categoryId)?.name ?? '未命名任务') : note,
+      note: _resolveNote(categoryId, note),
       groupId: _uuid.v4(),
     );
   }
@@ -127,7 +127,7 @@ class TimeTrackingController extends ChangeNotifier {
     }
     await _startActivity(
       categoryId: context.categoryId,
-      note: context.note,
+      note: _resolveNote(context.categoryId, context.note),
       groupId: context.groupId,
     );
   }
@@ -187,6 +187,49 @@ class TimeTrackingController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> updateCurrentNote(String note) async {
+    final current = _session.current;
+    if (current == null) {
+      return;
+    }
+    final resolved = _resolveNote(current.categoryId, note);
+    _session = _session.copyWith(
+      current: CurrentActivity(
+        tempId: current.tempId,
+        groupId: current.groupId,
+        categoryId: current.categoryId,
+        startTime: current.startTime,
+        note: resolved,
+      ),
+      lastUpdated: DateTime.now().millisecondsSinceEpoch,
+    );
+    await _storage.writeSession(_session);
+    notifyListeners();
+  }
+
+  Future<void> updateRecentNote(String groupId, String note) async {
+    final updated = <RecentContext>[];
+    for (final ctx in _session.recentContexts) {
+      if (ctx.groupId == groupId) {
+        updated.add(RecentContext(
+          groupId: ctx.groupId,
+          categoryId: ctx.categoryId,
+          note: _resolveNote(ctx.categoryId, note),
+          lastActiveTime: ctx.lastActiveTime,
+          accumulatedSeconds: ctx.accumulatedSeconds,
+        ));
+      } else {
+        updated.add(ctx);
+      }
+    }
+    _session = _session.copyWith(
+      recentContexts: updated,
+      lastUpdated: DateTime.now().millisecondsSinceEpoch,
+    );
+    await _storage.writeSession(_session);
+    notifyListeners();
+  }
+
   Future<ActivityRecord> manualAddRecord({
     required String categoryId,
     required String note,
@@ -206,7 +249,7 @@ class TimeTrackingController extends ChangeNotifier {
       startTime: startTime,
       endTime: endTime,
       durationSeconds: max(1, endTime.difference(startTime).inSeconds),
-      note: note,
+      note: _resolveNote(categoryId, note),
     );
     await _storage.appendActivity(record);
     final updatedContexts = _buildRecentContexts(record, push: true);
@@ -283,10 +326,32 @@ class TimeTrackingController extends ChangeNotifier {
     return _storage.deleteRecord(date, recordId);
   }
 
+  Future<List<ActivityRecord>> loadRangeRecords(DateTime start, DateTime end) {
+    return _storage.loadRangeRecords(start, end);
+  }
+
+  Future<ActivityRecord?> findLatestRecordForGroup(String groupId, {int lookBackDays = 60}) async {
+    final end = DateTime.now();
+    final start = end.subtract(Duration(days: lookBackDays));
+    final records = await _storage.loadRangeRecords(start, end);
+    ActivityRecord? latest;
+    for (final record in records) {
+      if (record.groupId == groupId) {
+        if (latest == null || record.startTime.isAfter(latest.startTime)) {
+          latest = record;
+        }
+      }
+    }
+    return latest;
+  }
+
   Future<Map<String, Duration>> categoryDurations(DateTime start, DateTime end) async {
     final records = await _storage.loadRangeRecords(start, end);
     final map = <String, int>{};
     for (final record in records) {
+      if (record.startTime.isBefore(start) || record.startTime.isAfter(end)) {
+        continue;
+      }
       map.update(record.categoryId, (value) => value + record.durationSeconds, ifAbsent: () => record.durationSeconds);
     }
     return map.map((key, value) => MapEntry(key, Duration(seconds: value)));
@@ -320,12 +385,13 @@ class TimeTrackingController extends ChangeNotifier {
     DateTime? startTime,
   }) async {
     final now = startTime ?? DateTime.now();
+    final resolvedNote = _resolveNote(categoryId, note);
     final activity = CurrentActivity(
       tempId: _uuid.v4(),
       groupId: groupId,
       categoryId: categoryId,
       startTime: now,
-      note: note,
+      note: resolvedNote,
     );
     _session = _session.copyWith(
       current: activity,
@@ -418,12 +484,21 @@ class TimeTrackingController extends ChangeNotifier {
       RecentContext(
         groupId: record.groupId,
         categoryId: record.categoryId,
-        note: record.note,
+        note: _resolveNote(record.categoryId, record.note),
         lastActiveTime: now,
         accumulatedSeconds: accumulated,
       ),
     );
     return merged.take(8).toList();
+  }
+
+  String _resolveNote(String categoryId, String note) {
+    final trimmed = note.trim();
+    if (trimmed.isNotEmpty) {
+      return trimmed;
+    }
+    final category = findCategory(categoryId);
+    return category?.name ?? '未命名任务';
   }
 
   @override
