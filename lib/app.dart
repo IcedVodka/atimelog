@@ -23,7 +23,6 @@ class _AtimeLogAppState extends State<AtimeLogApp>
   late Future<void> _initFuture;
   bool _trayReady = false;
   bool get _supportsTrayPopup => supportsTrayPopup;
-  bool _exitSyncScheduled = false;
 
   @override
   void initState() {
@@ -43,7 +42,6 @@ class _AtimeLogAppState extends State<AtimeLogApp>
       trayManager.removeListener(this);
       trayManager.destroy();
     }
-    _scheduleExitSync();
     super.dispose();
   }
 
@@ -87,26 +85,9 @@ class _AtimeLogAppState extends State<AtimeLogApp>
     if (!isDesktop) {
       return;
     }
-    _scheduleExitSync();
     await trayManager.destroy();
     await windowManager.setPreventClose(false);
-    if (Platform.isLinux) {
-      await windowManager.destroy();
-      exit(0);
-    } else {
-      await windowManager.close();
-    }
-  }
-
-  void _scheduleExitSync() {
-    if (_exitSyncScheduled) return;
-    _exitSyncScheduled = true;
-    unawaited(
-      widget.controller.syncNow(
-        manual: true,
-        reason: '退出前同步',
-      ),
-    );
+    await windowManager.close();
   }
 
   @override

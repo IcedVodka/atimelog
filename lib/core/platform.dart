@@ -11,5 +11,5 @@ String? trayIconPath() {
   if (!isDesktop) {
     return null;
   }
-  return Platform.isWindows ? 'assets/tray_icon.ico' : 'assets/tray_icon.png';
+  return Platform.isWindows ? 'assets/clock.ico' : 'assets/clock.png';
 }
