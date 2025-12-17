@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/utils/time_formatter.dart';
+import '../../models/sync_models.dart';
 import '../../models/time_models.dart';
 import '../../services/time_tracking_controller.dart';
 
@@ -547,6 +548,34 @@ class ActivityTabState extends State<ActivityTab> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  String _syncDetailText(SyncStatus status, bool isReady) {
+    final progress = status.progress;
+    if (status.syncing && progress != null) {
+      final detail = progress.detail?.trim();
+      if (detail != null && detail.isNotEmpty) {
+        return '${progress.stage} · $detail';
+      }
+      return progress.stage;
+    }
+    return status.lastSyncMessage ??
+        (status.lastSyncSucceeded == true
+            ? '最近已同步'
+            : (isReady ? '点击手动同步' : '请在更多页面填写 WebDAV 信息'));
+  }
+
+  String _syncCounterText(SyncStatus status) {
+    final progress = status.progress;
+    if (status.syncing && progress != null) {
+      return '↑${progress.uploaded}/${progress.totalUpload} '
+          '↓${progress.downloaded}/${progress.totalDownload}';
+    }
+    if (status.lastSyncSucceeded == null) {
+      return '';
+    }
+    return '↑${status.lastUploadCount} ↓${status.lastDownloadCount}'
+        ' · ${status.lastDuration?.inSeconds ?? 0}s';
+  }
+
   Widget _buildSyncInfo() {
     final status = widget.controller.syncStatus;
     final config = widget.controller.syncConfig;
@@ -573,14 +602,8 @@ class ActivityTabState extends State<ActivityTab> {
     final lastTime = status.lastSyncTime != null
         ? DateFormat('MM-dd HH:mm:ss').format(status.lastSyncTime!)
         : '暂无';
-    final detail = status.lastSyncMessage ??
-        (status.lastSyncSucceeded == true
-            ? '最近已同步'
-            : (isReady ? '点击手动同步' : '请在更多页面填写 WebDAV 信息'));
-    final counterText = status.lastSyncSucceeded == null
-        ? ''
-        : '↑${status.lastUploadCount} ↓${status.lastDownloadCount}'
-            ' · ${status.lastDuration?.inSeconds ?? 0}s';
+    final detail = _syncDetailText(status, isReady);
+    final counterText = _syncCounterText(status);
 
     return Card(
       color: theme.colorScheme.surfaceVariant.withOpacity(0.6),

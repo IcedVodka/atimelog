@@ -579,6 +579,7 @@ class TimeTrackingController extends ChangeNotifier {
         lastSyncSucceeded: false,
         lastSyncMessage: '未完成 WebDAV 配置',
         syncing: false,
+        clearProgress: true,
       );
       notifyListeners();
       return;
@@ -589,16 +590,26 @@ class TimeTrackingController extends ChangeNotifier {
         lastSyncSucceeded: false,
         lastSyncMessage: '自动同步已关闭',
         syncing: false,
+        clearProgress: true,
       );
       notifyListeners();
       return;
     }
     _syncStatus = _syncStatus.copyWith(
       syncing: true,
+      lastSyncSucceeded: null,
+      lastDuration: null,
       lastSyncMessage: reason ?? (manual ? '手动同步中' : '自动同步中'),
+      progress: SyncProgress(
+        stage: reason ?? (manual ? '手动同步中' : '自动同步中'),
+        detail: '准备同步...',
+      ),
     );
     notifyListeners();
-    final result = await _syncService.syncAll(_syncConfig);
+    final result = await _syncService.syncAll(
+      _syncConfig,
+      onProgress: _onSyncProgress,
+    );
     _syncStatus = _syncStatus.copyWith(
       syncing: false,
       lastSyncTime: DateTime.now(),
@@ -607,6 +618,7 @@ class TimeTrackingController extends ChangeNotifier {
       lastDuration: result.duration,
       lastUploadCount: result.uploaded,
       lastDownloadCount: result.downloaded,
+      clearProgress: true,
     );
     notifyListeners();
   }
@@ -631,6 +643,17 @@ class TimeTrackingController extends ChangeNotifier {
         lastSyncMessage: error.toString(),
       );
     }
+    notifyListeners();
+  }
+
+  void _onSyncProgress(SyncProgress progress) {
+    _syncStatus = _syncStatus.copyWith(
+      syncing: true,
+      progress: progress,
+      lastSyncMessage: progress.stage,
+      lastUploadCount: progress.uploaded,
+      lastDownloadCount: progress.downloaded,
+    );
     notifyListeners();
   }
 

@@ -79,6 +79,31 @@ class _SettingsTabState extends State<SettingsTab> {
     }
   }
 
+  String _syncMessageText(SyncStatus status) {
+    final progress = status.progress;
+    if (status.syncing && progress != null) {
+      final detail = progress.detail?.trim();
+      if (detail != null && detail.isNotEmpty) {
+        return '${progress.stage} · $detail';
+      }
+      return progress.stage;
+    }
+    return status.lastSyncMessage ?? '点击同步或验证连接';
+  }
+
+  String _syncCounterText(SyncStatus status) {
+    final progress = status.progress;
+    if (status.syncing && progress != null) {
+      return '↑${progress.uploaded}/${progress.totalUpload} '
+          '↓${progress.downloaded}/${progress.totalDownload}';
+    }
+    if (status.lastSyncSucceeded == null) {
+      return '';
+    }
+    return '↑${status.lastUploadCount} ↓${status.lastDownloadCount}'
+        ' · ${status.lastDuration?.inSeconds ?? 0}s';
+  }
+
   String _syncStatusLabel(SyncStatus status) {
     if (status.syncing) {
       return '同步中...';
@@ -111,7 +136,8 @@ class _SettingsTabState extends State<SettingsTab> {
     final timeText = status.lastSyncTime != null
         ? DateFormat('MM-dd HH:mm').format(status.lastSyncTime!)
         : '暂无记录';
-    final message = status.lastSyncMessage ?? '点击同步或验证连接';
+    final message = _syncMessageText(status);
+    final counterText = _syncCounterText(status);
     final autoLabel = _autoSyncEnabled
         ? '每 ${_autoIntervalMinutes.round()} 分钟自动同步'
         : '自动同步已关闭';
@@ -278,8 +304,19 @@ class _SettingsTabState extends State<SettingsTab> {
             ),
             const SizedBox(height: 10),
             Text(
-              '最近：$timeText · $message · '
-              '↑${status.lastUploadCount} ↓${status.lastDownloadCount}',
+              (() {
+                final parts = <String>[];
+                if (status.syncing && status.progress != null) {
+                  parts.add('进行中');
+                } else {
+                  parts.add('最近：$timeText');
+                }
+                parts.add(message);
+                if (counterText.isNotEmpty) {
+                  parts.add(counterText);
+                }
+                return parts.join(' · ');
+              })(),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),

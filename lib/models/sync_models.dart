@@ -73,6 +73,26 @@ class SyncConfig {
       enabled && isConfigured && autoIntervalMinutes > 0;
 }
 
+typedef SyncProgressCallback = void Function(SyncProgress progress);
+
+class SyncProgress {
+  const SyncProgress({
+    required this.stage,
+    this.detail,
+    this.uploaded = 0,
+    this.downloaded = 0,
+    this.totalUpload = 0,
+    this.totalDownload = 0,
+  });
+
+  final String stage;
+  final String? detail;
+  final int uploaded;
+  final int downloaded;
+  final int totalUpload;
+  final int totalDownload;
+}
+
 class SyncStatus {
   const SyncStatus({
     required this.syncing,
@@ -83,6 +103,7 @@ class SyncStatus {
     this.lastDuration,
     this.lastUploadCount = 0,
     this.lastDownloadCount = 0,
+    this.progress,
   });
 
   final bool syncing;
@@ -93,6 +114,7 @@ class SyncStatus {
   final Duration? lastDuration;
   final int lastUploadCount;
   final int lastDownloadCount;
+  final SyncProgress? progress;
 
   SyncStatus copyWith({
     bool? syncing,
@@ -103,6 +125,8 @@ class SyncStatus {
     Duration? lastDuration,
     int? lastUploadCount,
     int? lastDownloadCount,
+    SyncProgress? progress,
+    bool clearProgress = false,
   }) {
     return SyncStatus(
       syncing: syncing ?? this.syncing,
@@ -113,6 +137,7 @@ class SyncStatus {
       lastDuration: lastDuration ?? this.lastDuration,
       lastUploadCount: lastUploadCount ?? this.lastUploadCount,
       lastDownloadCount: lastDownloadCount ?? this.lastDownloadCount,
+      progress: clearProgress ? null : (progress ?? this.progress),
     );
   }
 
@@ -122,6 +147,7 @@ class SyncStatus {
       verifying: false,
       lastUploadCount: 0,
       lastDownloadCount: 0,
+      progress: null,
     );
   }
 }
