@@ -81,7 +81,9 @@ class RecentContext {
       groupId: json['groupId'] as String,
       categoryId: json['categoryId'] as String,
       note: json['note'] as String? ?? '',
-      lastActiveTime: DateTime.fromMillisecondsSinceEpoch(json['lastActiveTime'] as int),
+      lastActiveTime: DateTime.fromMillisecondsSinceEpoch(
+        json['lastActiveTime'] as int,
+      ),
       accumulatedSeconds: json['accumulatedSeconds'] as int? ?? 0,
     );
   }
@@ -137,8 +139,8 @@ class CurrentSession {
       recentContexts: contexts == null
           ? const []
           : contexts
-              .map((e) => RecentContext.fromJson(e as Map<String, dynamic>))
-              .toList(),
+                .map((e) => RecentContext.fromJson(e as Map<String, dynamic>))
+                .toList(),
     );
   }
 
@@ -203,7 +205,8 @@ class ActivityRecord {
 
     final start = parseTime(startRaw);
     final end = parseTime(endRaw);
-    final durationSeconds = json['duration'] as int? ??
+    final durationSeconds =
+        json['duration'] as int? ??
         json['durationSeconds'] as int? ??
         end.difference(start).inSeconds;
     return ActivityRecord(
@@ -319,10 +322,7 @@ String prettyJson(Map<String, dynamic> payload) {
 
 /// 应用基础设置。
 class AppSettings {
-  const AppSettings({
-    required this.darkMode,
-    this.lastBackupPath,
-  });
+  const AppSettings({required this.darkMode, this.lastBackupPath});
 
   final bool darkMode;
   final String? lastBackupPath;
@@ -335,10 +335,7 @@ class AppSettings {
   }
 
   Map<String, dynamic> toJson() {
-    return {
-      'darkMode': darkMode,
-      'lastBackupPath': lastBackupPath,
-    };
+    return {'darkMode': darkMode, 'lastBackupPath': lastBackupPath};
   }
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
@@ -368,11 +365,15 @@ class AggregatedTimelineGroup {
   final List<ActivityRecord> segments;
 
   Duration get totalDuration {
-    final seconds = segments.fold<int>(0, (prev, e) => prev + e.durationSeconds);
+    final seconds = segments.fold<int>(
+      0,
+      (prev, e) => prev + e.durationSeconds,
+    );
     return Duration(seconds: seconds);
   }
 
-  DateTime get start => segments.isEmpty ? DateTime.now() : segments.first.startTime;
+  DateTime get start =>
+      segments.isEmpty ? DateTime.now() : segments.first.startTime;
   DateTime get end => segments.isEmpty ? DateTime.now() : segments.last.endTime;
 }
 

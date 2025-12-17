@@ -1,0 +1,949 @@
+import 'dart:async';
+import 'dart:math';
+
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+
+import '../../core/utils/time_formatter.dart';
+import '../../models/time_models.dart';
+import '../../services/time_tracking_controller.dart';
+
+class ActivityTab extends StatefulWidget {
+  const ActivityTab({
+    super.key,
+    required this.controller,
+    required this.noteController,
+  });
+
+  final TimeTrackingController controller;
+  final TextEditingController noteController;
+
+  @override
+  State<ActivityTab> createState() => ActivityTabState();
+}
+
+class ActivityTabState extends State<ActivityTab> {
+  String? _selectedCategoryId;
+  bool _savingCurrentNote = false;
+  String? _lastCurrentTempId;
+  Timer? _noteSaveDebounce;
+
+  @override
+  void initState() {
+    super.initState();
+    final cats = widget.controller.categories.where((e) => e.enabled).toList();
+    if (cats.isNotEmpty) {
+      _selectedCategoryId = cats.first.id;
+    }
+  }
+
+  @override
+  void dispose() {
+    _noteSaveDebounce?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _startFromSelected() async {
+    const noteText = '';
+    final categoryId = _selectedCategoryId;
+    if (categoryId == null) {
+      _showSnack('暂无分类可用');
+      return;
+    }
+    try {
+      await widget.controller.startNewActivity(
+        categoryId: categoryId,
+        note: noteText,
+        allowSwitch: true,
+      );
+    } catch (error) {
+      _showSnack(error.toString());
+    }
+  }
+
+  Future<void> _handlePause() async {
+    try {
+      await widget.controller.stopCurrentActivity(pushToRecent: true);
+    } catch (error) {
+      _showSnack(error.toString());
+    }
+  }
+
+  Future<void> _handleStop() async {
+    try {
+      await widget.controller.stopCurrentActivity(pushToRecent: false);
+    } catch (error) {
+      _showSnack(error.toString());
+    }
+  }
+
+  Future<void> _handleResume(RecentContext contextItem) async {
+    widget.noteController.text = contextItem.note;
+    try {
+      await widget.controller.resumeFromContext(contextItem);
+    } catch (error) {
+      _showSnack(error.toString());
+    }
+  }
+
+  Future<void> _handleEditStartTime(CurrentActivity current) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(current.startTime),
+    );
+    if (picked == null) {
+      return;
+    }
+    final updatedStart = DateTime(
+      current.startTime.year,
+      current.startTime.month,
+      current.startTime.day,
+      picked.hour,
+      picked.minute,
+    );
+    await widget.controller.updateCurrentStartTime(updatedStart);
+  }
+
+  void _debounceCurrentNoteSave(CurrentActivity current) {
+    if (widget.noteController.text.trim() == current.note.trim()) {
+      return;
+    }
+    _noteSaveDebounce?.cancel();
+    _noteSaveDebounce = Timer(
+      const Duration(milliseconds: 600),
+      () => _handleEditCurrentNote(current),
+    );
+  }
+
+  Future<void> _handleEditCurrentNote(CurrentActivity current) async {
+    if (_savingCurrentNote) {
+      _noteSaveDebounce?.cancel();
+      _noteSaveDebounce = Timer(
+        const Duration(milliseconds: 400),
+        () => _handleEditCurrentNote(current),
+      );
+      return;
+    }
+    setState(() => _savingCurrentNote = true);
+    try {
+      await widget.controller.updateCurrentNote(
+        widget.noteController.text.trim(),
+      );
+    } catch (error) {
+      _showSnack(error.toString());
+    } finally {
+      if (mounted) setState(() => _savingCurrentNote = false);
+    }
+  }
+
+  Future<void> _editRecentContext(RecentContext contextItem) async {
+    final latest = await widget.controller.findLatestRecordForGroup(
+      contextItem.groupId,
+    );
+    if (latest == null) {
+      _showSnack('未找到可编辑的历史片段');
+      return;
+    }
+    final category = widget.controller.findCategory(contextItem.categoryId);
+    final noteController = TextEditingController(
+      text: contextItem.note.isNotEmpty
+          ? contextItem.note
+          : (category?.name ?? ''),
+    );
+    DateTime startDate = latest.startTime;
+    DateTime endDate = latest.endTime;
+    TimeOfDay startTime = TimeOfDay.fromDateTime(latest.startTime);
+    TimeOfDay endTime = TimeOfDay.fromDateTime(latest.endTime);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('编辑最近活动'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: noteController,
+                    decoration: const InputDecoration(labelText: '记录内容'),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: startDate,
+                              firstDate: DateTime.now().subtract(
+                                const Duration(days: 60),
+                              ),
+                              lastDate: DateTime.now(),
+                            );
+                            if (picked != null) {
+                              setDialogState(() => startDate = picked);
+                            }
+                          },
+                          icon: const Icon(Icons.calendar_today_outlined),
+                          label: Text(
+                            DateFormat('yyyy-MM-dd').format(startDate),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: endDate,
+                              firstDate: DateTime.now().subtract(
+                                const Duration(days: 60),
+                              ),
+                              lastDate: DateTime.now(),
+                            );
+                            if (picked != null) {
+                              setDialogState(() => endDate = picked);
+                            }
+                          },
+                          icon: const Icon(Icons.event),
+                          label: Text(DateFormat('yyyy-MM-dd').format(endDate)),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final picked = await showTimePicker(
+                              context: context,
+                              initialTime: startTime,
+                            );
+                            if (picked != null) {
+                              setDialogState(() => startTime = picked);
+                            }
+                          },
+                          icon: const Icon(Icons.play_arrow),
+                          label: Text(startTime.format(context)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final picked = await showTimePicker(
+                              context: context,
+                              initialTime: endTime,
+                            );
+                            if (picked != null) {
+                              setDialogState(() => endTime = picked);
+                            }
+                          },
+                          icon: const Icon(Icons.stop),
+                          label: Text(endTime.format(context)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('保存'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    final newStart = DateTime(
+      startDate.year,
+      startDate.month,
+      startDate.day,
+      startTime.hour,
+      startTime.minute,
+    );
+    final newEnd = DateTime(
+      endDate.year,
+      endDate.month,
+      endDate.day,
+      endTime.hour,
+      endTime.minute,
+    );
+    if (!newStart.isBefore(newEnd)) {
+      _showSnack('结束时间需要晚于开始时间');
+      return;
+    }
+    if (!isSameDay(newStart, latest.startTime)) {
+      _showSnack('暂不支持跨日修改最近活动');
+      return;
+    }
+    if (!isSameDay(newEnd, latest.endTime)) {
+      _showSnack('暂不支持跨日修改最近活动');
+      return;
+    }
+    final resolvedNote = noteController.text.trim().isEmpty
+        ? (category?.name ?? '其他.${contextItem.categoryId}')
+        : noteController.text.trim();
+    await widget.controller.updateRecordWithSync(
+      record: latest,
+      newStart: newStart,
+      newEnd: newEnd,
+      note: resolvedNote,
+      syncGroupNotes: true,
+    );
+    await widget.controller.updateRecentNote(contextItem.groupId, resolvedNote);
+    setState(() {});
+    _showSnack('已更新最近活动');
+  }
+
+  Future<void> showManualDialog([CategoryModel? initialCategory]) async {
+    final categories = widget.controller.categories
+        .where((c) => c.enabled)
+        .toList();
+    if (categories.isEmpty) {
+      _showSnack('暂无分类可用于补录');
+      return;
+    }
+    CategoryModel? selected = initialCategory ?? categories.first;
+    DateTime startDate = DateTime.now();
+    DateTime endDate = DateTime.now();
+    TimeOfDay start = TimeOfDay.fromDateTime(DateTime.now());
+    TimeOfDay end = TimeOfDay.fromDateTime(
+      DateTime.now().add(const Duration(minutes: 25)),
+    );
+    final noteController = TextEditingController(text: selected.name);
+    bool noteTouched = false;
+
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 12,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 12,
+          ),
+          child: StatefulBuilder(
+            builder: (context, setSheetState) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '手动补录',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<CategoryModel>(
+                    decoration: const InputDecoration(labelText: '分类'),
+                    value: selected,
+                    items: categories
+                        .map(
+                          (cat) => DropdownMenuItem(
+                            value: cat,
+                            child: Row(
+                              children: [
+                                Icon(cat.iconData, color: cat.color),
+                                const SizedBox(width: 8),
+                                Text(cat.name),
+                              ],
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) => setSheetState(() {
+                      final previousName = selected?.name ?? '';
+                      selected = value;
+                      final currentText = noteController.text.trim();
+                      final shouldSync =
+                          !noteTouched ||
+                          currentText.isEmpty ||
+                          currentText == previousName;
+                      if (value != null && shouldSync) {
+                        noteController.text = value.name;
+                        noteTouched = false;
+                      }
+                    }),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: noteController,
+                    decoration: const InputDecoration(labelText: '记录内容'),
+                    onChanged: (_) => noteTouched = true,
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final pickedDate = await showDatePicker(
+                              context: context,
+                              initialDate: startDate,
+                              firstDate: DateTime.now().subtract(
+                                const Duration(days: 30),
+                              ),
+                              lastDate: DateTime.now(),
+                            );
+                            if (pickedDate != null) {
+                              setSheetState(() => startDate = pickedDate);
+                            }
+                          },
+                          icon: const Icon(Icons.calendar_today_outlined),
+                          label: Text(
+                            DateFormat('yyyy-MM-dd').format(startDate),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final picked = await showTimePicker(
+                              context: context,
+                              initialTime: start,
+                            );
+                            if (picked != null) {
+                              setSheetState(() => start = picked);
+                            }
+                          },
+                          icon: const Icon(Icons.play_arrow),
+                          label: Text(start.format(context)),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final pickedDate = await showDatePicker(
+                              context: context,
+                              initialDate: endDate,
+                              firstDate: DateTime.now().subtract(
+                                const Duration(days: 30),
+                              ),
+                              lastDate: DateTime.now(),
+                            );
+                            if (pickedDate != null) {
+                              setSheetState(() => endDate = pickedDate);
+                            }
+                          },
+                          icon: const Icon(Icons.event),
+                          label: Text(DateFormat('yyyy-MM-dd').format(endDate)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final picked = await showTimePicker(
+                              context: context,
+                              initialTime: end,
+                            );
+                            if (picked != null) {
+                              setSheetState(() => end = picked);
+                            }
+                          },
+                          icon: const Icon(Icons.stop),
+                          label: Text(end.format(context)),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(false),
+                        child: const Text('取消'),
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton(
+                        onPressed: selected == null
+                            ? null
+                            : () => Navigator.of(context).pop(true),
+                        child: const Text('保存'),
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+
+    if (result != true || selected == null) {
+      return;
+    }
+    final CategoryModel cat = selected!;
+    final startDateTime = DateTime(
+      startDate.year,
+      startDate.month,
+      startDate.day,
+      start.hour,
+      start.minute,
+    );
+    final endDateTime = DateTime(
+      endDate.year,
+      endDate.month,
+      endDate.day,
+      end.hour,
+      end.minute,
+    );
+    if (!startDateTime.isBefore(endDateTime)) {
+      _showSnack('结束时间需要晚于开始时间');
+      return;
+    }
+    try {
+      await widget.controller.manualAddRecord(
+        categoryId: cat.id,
+        note: noteController.text.trim().isEmpty
+            ? cat.name
+            : noteController.text.trim(),
+        startTime: startDateTime,
+        endTime: endDateTime,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('补录完成')));
+    } catch (error) {
+      _showSnack(error.toString());
+    }
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: widget.controller,
+      builder: (context, _) {
+        final categories = widget.controller.categories
+            .where((e) => e.enabled)
+            .toList();
+        if (_selectedCategoryId == null && categories.isNotEmpty) {
+          _selectedCategoryId = categories.first.id;
+        }
+        final activity = widget.controller.currentActivity;
+        final recents = widget.controller.recentContexts;
+
+        return SafeArea(
+          child: ListView(
+            primary: false,
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            children: [
+              _buildActiveCard(activity),
+              const SizedBox(height: 12),
+              _buildQuickStart(categories),
+              const SizedBox(height: 12),
+              _buildRecents(recents),
+              const SizedBox(height: 12),
+              _buildCategoryGrid(categories),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildActiveCard(CurrentActivity? current) {
+    if (current == null) {
+      _lastCurrentTempId = null;
+      widget.noteController.text = '';
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('尚未开始', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 8),
+              Text(
+                '点击下方分类开始新任务，记录内容默认使用分类名称，可在开始后修改。',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _startFromSelected,
+                icon: const Icon(Icons.play_arrow_rounded),
+                label: const Text('开始计时'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final category = widget.controller.findCategory(current.categoryId);
+    if (_lastCurrentTempId != current.tempId) {
+      _lastCurrentTempId = current.tempId;
+      widget.noteController.text = current.note;
+    }
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor:
+                      category?.color.withOpacity(0.15) ??
+                      Colors.blue.withOpacity(0.15),
+                  child: Icon(
+                    category?.iconData ?? Icons.timelapse,
+                    color: category?.color ?? Colors.blue,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        category?.name ?? '进行中',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        current.note,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => _handleEditStartTime(current),
+                  icon: const Icon(Icons.edit_calendar),
+                  tooltip: '修改开始时间',
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: widget.noteController,
+              onChanged: (_) => _debounceCurrentNoteSave(current),
+              decoration: InputDecoration(
+                labelText: '记录内容',
+                suffixIcon: _savingCurrentNote
+                    ? const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: Icon(Icons.check_circle, size: 18),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              formatDurationText(widget.controller.currentDuration),
+              style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: category?.color ?? Theme.of(context).colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _handlePause,
+                    icon: const Icon(Icons.pause),
+                    label: const Text('暂停 (归档)'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.red.shade600,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _handleStop,
+                    icon: const Icon(Icons.stop),
+                    label: const Text('停止并归档保存'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickStart(List<CategoryModel> categories) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('快速开始', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _selectedCategoryId,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      labelText: '分类',
+                    ),
+                    items: categories
+                        .map(
+                          (cat) => DropdownMenuItem(
+                            value: cat.id,
+                            child: Row(
+                              children: [
+                                Icon(cat.iconData, color: cat.color),
+                                const SizedBox(width: 8),
+                                Text(cat.name),
+                              ],
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) =>
+                        setState(() => _selectedCategoryId = value),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                FilledButton.icon(
+                  onPressed: _startFromSelected,
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: const Text('开始'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecents(List<RecentContext> recents) {
+    if (recents.isEmpty) {
+      return const Text('最近没有暂停的任务，暂停后可在这里继续。');
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('最近活动', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        ...recents.map((item) {
+          final category = widget.controller.findCategory(item.categoryId);
+          final isDeleted = category?.deleted ?? false;
+          final isEnabled = category?.enabled ?? false;
+          final statusLabel = isDeleted
+              ? '（分类已删除）'
+              : (!isEnabled ? '（已停用）' : '');
+          final durationText = formatDurationText(
+            Duration(seconds: item.accumulatedSeconds),
+          );
+          return Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor:
+                        category?.color.withOpacity(0.1) ??
+                        Colors.blue.withOpacity(0.1),
+                    child: Icon(
+                      category?.iconData ?? Icons.history,
+                      color: category?.color ?? Colors.blue,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.note,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${category?.name ?? item.categoryId}$statusLabel · 已记录 $durationText · ${formatLastActiveText(item.lastActiveTime)}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: isDeleted || !isEnabled
+                        ? null
+                        : () => _handleResume(item),
+                    icon: const Icon(Icons.play_circle, color: Colors.green),
+                    tooltip: isDeleted
+                        ? '分类已删除，无法继续'
+                        : (!isEnabled ? '分类已停用，无法继续' : '继续'),
+                  ),
+                  IconButton(
+                    onPressed: () => _editRecentContext(item),
+                    icon: const Icon(Icons.edit_note_outlined),
+                    tooltip: '编辑',
+                  ),
+                  IconButton(
+                    onPressed: () async =>
+                        widget.controller.removeRecentContext(item.groupId),
+                    icon: const Icon(
+                      Icons.archive_outlined,
+                      color: Colors.redAccent,
+                    ),
+                    tooltip: '归档保存',
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _buildCategoryGrid(List<CategoryModel> categories) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('分类网格', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final crossAxisCount = max(5, min(8, (width / 90).floor()));
+            return GridView.builder(
+              primary: false,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: crossAxisCount,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                childAspectRatio: 0.78,
+              ),
+              itemCount: categories.length,
+              itemBuilder: (context, index) {
+                final category = categories[index];
+                final name = category.name.trim();
+                final groupName = category.group.isNotEmpty
+                    ? category.group
+                    : (name.contains('.')
+                          ? name.split('.').first.trim()
+                          : name);
+                return InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () async {
+                    const noteText = '';
+                    try {
+                      await widget.controller.switchToCategory(
+                        categoryId: category.id,
+                        note: noteText,
+                      );
+                    } catch (error) {
+                      _showSnack(error.toString());
+                    }
+                  },
+                  onLongPress: () => showManualDialog(category),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceVariant.withOpacity(0.35),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: category.color.withOpacity(0.35),
+                      ),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 10,
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          category.iconData,
+                          color: category.color,
+                          size: 26,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          category.name,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (groupName.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              groupName,
+                              style: Theme.of(context).textTheme.labelSmall,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      ],
+    );
+  }
+}

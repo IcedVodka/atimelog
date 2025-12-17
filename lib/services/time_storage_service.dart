@@ -133,7 +133,11 @@ class TimeStorageService {
     return records;
   }
 
-  Future<void> saveDayRecords(DateTime date, List<ActivityRecord> records, {int? lastUpdated}) async {
+  Future<void> saveDayRecords(
+    DateTime date,
+    List<ActivityRecord> records, {
+    int? lastUpdated,
+  }) async {
     final file = await _dayFile(date);
     final day = DateFormat('yyyy-MM-dd').format(date);
     final payload = {
@@ -172,7 +176,10 @@ class TimeStorageService {
     await saveDayRecords(date, records);
   }
 
-  Future<List<ActivityRecord>> loadRangeRecords(DateTime start, DateTime end) async {
+  Future<List<ActivityRecord>> loadRangeRecords(
+    DateTime start,
+    DateTime end,
+  ) async {
     final startDay = DateTime(start.year, start.month, start.day);
     final endDay = DateTime(end.year, end.month, end.day);
     final records = <ActivityRecord>[];
@@ -229,10 +236,12 @@ class TimeStorageService {
     final file = await _categoriesFile();
     final normalized = categories.map(_normalizeCategory).toList();
     final payload = [...normalized]..sort((a, b) => a.order.compareTo(b.order));
-    await file.writeAsString(prettyJson({
-      'lastUpdated': DateTime.now().millisecondsSinceEpoch,
-      'items': payload.map((e) => e.toJson()).toList(),
-    }));
+    await file.writeAsString(
+      prettyJson({
+        'lastUpdated': DateTime.now().millisecondsSinceEpoch,
+        'items': payload.map((e) => e.toJson()).toList(),
+      }),
+    );
   }
 
   Future<AppSettings> loadSettings() async {
@@ -419,7 +428,8 @@ class TimeStorageService {
 
     final encoder = ZipEncoder();
     final zipped = encoder.encode(archive);
-    final name = 'atimelog_backup_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.zip';
+    final name =
+        'atimelog_backup_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.zip';
     final outFile = File(p.join(base.parent.path, name));
     await outFile.writeAsBytes(zipped ?? <int>[]);
     return outFile;

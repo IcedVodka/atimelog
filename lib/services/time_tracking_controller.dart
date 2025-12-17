@@ -10,8 +10,8 @@ import 'time_storage_service.dart';
 
 class TimeTrackingController extends ChangeNotifier {
   TimeTrackingController(TimeStorageService storage)
-      : _storage = storage,
-        _session = CurrentSession.empty(deviceId: storage.deviceId);
+    : _storage = storage,
+      _session = CurrentSession.empty(deviceId: storage.deviceId);
 
   final TimeStorageService _storage;
   final Uuid _uuid = const Uuid();
@@ -26,8 +26,10 @@ class TimeTrackingController extends ChangeNotifier {
   bool get isInitialized => _isInitialized;
   bool get isRunning => _session.current != null;
   CurrentActivity? get currentActivity => _session.current;
-  List<RecentContext> get recentContexts => List.unmodifiable(_session.recentContexts);
-  List<CategoryModel> get categories => List.unmodifiable(_categories.where((element) => !element.deleted));
+  List<RecentContext> get recentContexts =>
+      List.unmodifiable(_session.recentContexts);
+  List<CategoryModel> get categories =>
+      List.unmodifiable(_categories.where((element) => !element.deleted));
   List<CategoryModel> get allCategories => List.unmodifiable(_categories);
   AppSettings get settings => _settings;
 
@@ -82,7 +84,9 @@ class TimeTrackingController extends ChangeNotifier {
   }
 
   Future<void> addOrUpdateCategory(CategoryModel category) async {
-    final existingIndex = _categories.indexWhere((element) => element.id == category.id);
+    final existingIndex = _categories.indexWhere(
+      (element) => element.id == category.id,
+    );
     if (existingIndex == -1) {
       _categories = [..._categories, category];
     } else {
@@ -155,7 +159,11 @@ class TimeTrackingController extends ChangeNotifier {
     required String categoryId,
     required String note,
   }) {
-    return startNewActivity(categoryId: categoryId, note: note, allowSwitch: true);
+    return startNewActivity(
+      categoryId: categoryId,
+      note: note,
+      allowSwitch: true,
+    );
   }
 
   Future<void> resumeFromContext(RecentContext context) async {
@@ -170,7 +178,9 @@ class TimeTrackingController extends ChangeNotifier {
     );
   }
 
-  Future<ActivityRecord?> stopCurrentActivity({bool pushToRecent = true}) async {
+  Future<ActivityRecord?> stopCurrentActivity({
+    bool pushToRecent = true,
+  }) async {
     final current = _session.current;
     if (current == null) {
       return null;
@@ -203,7 +213,9 @@ class TimeTrackingController extends ChangeNotifier {
   }
 
   Future<void> removeRecentContext(String groupId) async {
-    final updated = _session.recentContexts.where((element) => element.groupId != groupId).toList();
+    final updated = _session.recentContexts
+        .where((element) => element.groupId != groupId)
+        .toList();
     _session = _session.copyWith(
       recentContexts: updated,
       lastUpdated: DateTime.now().millisecondsSinceEpoch,
@@ -249,13 +261,15 @@ class TimeTrackingController extends ChangeNotifier {
     final updated = <RecentContext>[];
     for (final ctx in _session.recentContexts) {
       if (ctx.groupId == groupId) {
-        updated.add(RecentContext(
-          groupId: ctx.groupId,
-          categoryId: ctx.categoryId,
-          note: _resolveNote(ctx.categoryId, note),
-          lastActiveTime: ctx.lastActiveTime,
-          accumulatedSeconds: ctx.accumulatedSeconds,
-        ));
+        updated.add(
+          RecentContext(
+            groupId: ctx.groupId,
+            categoryId: ctx.categoryId,
+            note: _resolveNote(ctx.categoryId, note),
+            lastActiveTime: ctx.lastActiveTime,
+            accumulatedSeconds: ctx.accumulatedSeconds,
+          ),
+        );
       } else {
         updated.add(ctx);
       }
@@ -283,9 +297,20 @@ class TimeTrackingController extends ChangeNotifier {
     final segments = <ActivityRecord>[];
     var cursorStart = startTime;
     while (cursorStart.isBefore(endTime)) {
-      final endOfDay = DateTime(cursorStart.year, cursorStart.month, cursorStart.day, 23, 59, 59, 999);
+      final endOfDay = DateTime(
+        cursorStart.year,
+        cursorStart.month,
+        cursorStart.day,
+        23,
+        59,
+        59,
+        999,
+      );
       final segmentEnd = endTime.isBefore(endOfDay) ? endTime : endOfDay;
-      final durationSeconds = max(1, segmentEnd.difference(cursorStart).inSeconds);
+      final durationSeconds = max(
+        1,
+        segmentEnd.difference(cursorStart).inSeconds,
+      );
       segments.add(
         ActivityRecord(
           id: _uuid.v4(),
@@ -301,7 +326,11 @@ class TimeTrackingController extends ChangeNotifier {
       if (!segmentEnd.isBefore(endTime)) {
         break;
       }
-      cursorStart = DateTime(cursorStart.year, cursorStart.month, cursorStart.day).add(const Duration(days: 1));
+      cursorStart = DateTime(
+        cursorStart.year,
+        cursorStart.month,
+        cursorStart.day,
+      ).add(const Duration(days: 1));
     }
 
     for (final segment in segments) {
@@ -338,9 +367,12 @@ class TimeTrackingController extends ChangeNotifier {
       groups.putIfAbsent(record.groupId, () => []).add(record);
     }
     final aggregated = groups.entries.map((entry) {
-      final sorted = [...entry.value]..sort((a, b) => a.startTime.compareTo(b.startTime));
+      final sorted = [...entry.value]
+        ..sort((a, b) => a.startTime.compareTo(b.startTime));
       final first = sorted.first;
-      final note = first.note.isNotEmpty ? first.note : (findCategory(first.categoryId)?.name ?? '');
+      final note = first.note.isNotEmpty
+          ? first.note
+          : (findCategory(first.categoryId)?.name ?? '');
       return AggregatedTimelineGroup(
         groupId: entry.key,
         categoryId: first.categoryId,
@@ -415,7 +447,10 @@ class TimeTrackingController extends ChangeNotifier {
     return _storage.loadRangeRecords(start, end);
   }
 
-  Future<ActivityRecord?> findLatestRecordForGroup(String groupId, {int lookBackDays = 60}) async {
+  Future<ActivityRecord?> findLatestRecordForGroup(
+    String groupId, {
+    int lookBackDays = 60,
+  }) async {
     final end = DateTime.now();
     final start = end.subtract(Duration(days: lookBackDays));
     final records = await _storage.loadRangeRecords(start, end);
@@ -430,7 +465,10 @@ class TimeTrackingController extends ChangeNotifier {
     return latest;
   }
 
-  Future<Map<String, Duration>> categoryDurations(DateTime start, DateTime end) async {
+  Future<Map<String, Duration>> categoryDurations(
+    DateTime start,
+    DateTime end,
+  ) async {
     final records = await _storage.loadRangeRecords(start, end);
     final map = <String, int>{};
     for (final record in records) {
@@ -438,11 +476,17 @@ class TimeTrackingController extends ChangeNotifier {
       if (!record.endTime.isAfter(start) || !record.startTime.isBefore(end)) {
         continue;
       }
-      final clippedStart = record.startTime.isBefore(start) ? start : record.startTime;
+      final clippedStart = record.startTime.isBefore(start)
+          ? start
+          : record.startTime;
       final clippedEnd = record.endTime.isAfter(end) ? end : record.endTime;
       final seconds = clippedEnd.difference(clippedStart).inSeconds;
       if (seconds <= 0) continue;
-      map.update(record.categoryId, (value) => value + seconds, ifAbsent: () => seconds);
+      map.update(
+        record.categoryId,
+        (value) => value + seconds,
+        ifAbsent: () => seconds,
+      );
     }
     return map.map((key, value) => MapEntry(key, Duration(seconds: value)));
   }
@@ -529,7 +573,10 @@ class TimeTrackingController extends ChangeNotifier {
         59,
         999,
       );
-      final firstDuration = max(1, endOfDay.difference(current.startTime).inSeconds);
+      final firstDuration = max(
+        1,
+        endOfDay.difference(current.startTime).inSeconds,
+      );
       final record = ActivityRecord(
         id: _uuid.v4(),
         groupId: current.groupId,
@@ -555,9 +602,14 @@ class TimeTrackingController extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<RecentContext> _buildRecentContexts(ActivityRecord record, {required bool push}) {
+  List<RecentContext> _buildRecentContexts(
+    ActivityRecord record, {
+    required bool push,
+  }) {
     if (!push) {
-      return _session.recentContexts.where((element) => element.groupId != record.groupId).toList();
+      return _session.recentContexts
+          .where((element) => element.groupId != record.groupId)
+          .toList();
     }
     final now = DateTime.now();
     RecentContext? existed;
@@ -567,8 +619,11 @@ class TimeTrackingController extends ChangeNotifier {
         break;
       }
     }
-    final merged = _session.recentContexts.where((element) => element.groupId != record.groupId).toList();
-    final accumulated = (existed?.accumulatedSeconds ?? 0) + record.durationSeconds;
+    final merged = _session.recentContexts
+        .where((element) => element.groupId != record.groupId)
+        .toList();
+    final accumulated =
+        (existed?.accumulatedSeconds ?? 0) + record.durationSeconds;
     merged.insert(
       0,
       RecentContext(
@@ -604,7 +659,8 @@ class TimeTrackingController extends ChangeNotifier {
       if (item.groupId != origin.groupId || item.id == origin.id) {
         continue;
       }
-      final closeToOrigin = item.isCrossDaySplit ||
+      final closeToOrigin =
+          item.isCrossDaySplit ||
           origin.isCrossDaySplit ||
           isSameDay(item.startTime, origin.startTime) ||
           item.startTime.difference(origin.startTime).inHours.abs() <= 30;
