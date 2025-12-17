@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import '../../core/common_icons.dart';
 import '../../models/time_models.dart';
 import '../../services/time_tracking_controller.dart';
 
@@ -15,78 +16,25 @@ class CategoryManageTab extends StatefulWidget {
 }
 
 class _CategoryManageTabState extends State<CategoryManageTab> {
-  final List<Color> _palette = const [
-    Color(0xFF1565C0), // 蓝
-    Color(0xFF1E88E5),
-    Color(0xFF90CAF9),
-    Color(0xFF0D47A1),
-    Color(0xFF6A1B9A), // 紫
-    Color(0xFF8E24AA),
-    Color(0xFFBA68C8),
-    Color(0xFF9C27B0),
-    Color(0xFFC2185B), // 粉
-    Color(0xFFE91E63),
-    Color(0xFFFF80AB),
-    Color(0xFFD81B60),
-    Color(0xFF00897B), // 青
-    Color(0xFF26A69A),
-    Color(0xFF26C6DA),
-    Color(0xFF4DD0E1),
-    Color(0xFF2E7D32), // 绿
-    Color(0xFF43A047),
-    Color(0xFF81C784),
-    Color(0xFFA5D6A7),
-    Color(0xFFFFB300), // 黄/橙
-    Color(0xFFFFD54F),
-    Color(0xFFFF8F00),
-    Color(0xFFFF7043),
-    Color(0xFF6D4C41), // 棕
-    Color(0xFF8D6E63),
-    Color(0xFF455A64), // 深灰
-    Color(0xFF607D8B),
-    Color(0xFF9E9E9E),
-  ];
-  final List<IconData> _iconOptions = const [
-    Icons.computer,
-    Icons.hotel_outlined,
-    Icons.movie_filter_outlined,
-    Icons.fitness_center,
-    Icons.sports_esports,
-    Icons.home,
-    Icons.people,
-    Icons.book_outlined,
-    Icons.shopping_cart,
-    Icons.work_outline,
-    Icons.fastfood,
-    Icons.code,
-    Icons.brush_outlined,
-    Icons.music_note,
-    Icons.pets,
-    Icons.child_friendly,
-    Icons.school,
-    Icons.car_rental,
-    Icons.self_improvement,
-    Icons.travel_explore,
-    Icons.coffee,
-    Icons.nightlight_round,
-    Icons.camera_alt_outlined,
-    Icons.flight_takeoff,
-    Icons.hiking,
-    Icons.public,
-    Icons.lightbulb_outline,
-    Icons.laptop_mac,
-    Icons.directions_bike,
-    Icons.local_hospital,
-    Icons.mediation,
-    Icons.palette_outlined,
-    Icons.waves,
-    Icons.timer,
-    Icons.restaurant_menu,
-    Icons.spa,
-    Icons.emoji_events,
-    Icons.handyman_outlined,
-    Icons.build_circle_outlined,
-    Icons.cake_outlined,
+  final List<MaterialColor> _colorFamilies = const [
+    Colors.red,
+    Colors.pink,
+    Colors.purple,
+    Colors.deepPurple,
+    Colors.indigo,
+    Colors.blue,
+    Colors.lightBlue,
+    Colors.cyan,
+    Colors.teal,
+    Colors.green,
+    Colors.lightGreen,
+    Colors.lime,
+    Colors.amber,
+    Colors.orange,
+    Colors.deepOrange,
+    Colors.brown,
+    Colors.blueGrey,
+    Colors.grey,
   ];
   int? _draggingIndex;
 
@@ -103,10 +51,36 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     }
 
     addIcon(current);
-    for (final icon in _iconOptions) {
+    for (final icon in commonIcons) {
       addIcon(icon);
     }
     return result;
+  }
+
+  List<Color> _shadeCandidates(MaterialColor family) {
+    const shadeKeys = [300, 500, 700, 900];
+    return shadeKeys
+        .map((key) => family[key] ?? family.shade500)
+        .toList(growable: false);
+  }
+
+  MaterialColor _matchColorFamily(Color target) {
+    MaterialColor? bestFamily;
+    var bestScore = 1 << 30;
+
+    for (final family in _colorFamilies) {
+      for (final shade in _shadeCandidates(family)) {
+        final score = (target.red - shade.red).abs() +
+            (target.green - shade.green).abs() +
+            (target.blue - shade.blue).abs();
+        if (score < bestScore) {
+          bestScore = score;
+          bestFamily = family;
+        }
+      }
+    }
+
+    return bestFamily ?? Colors.blue;
   }
 
   String _deriveGroupFromName(String name) {
@@ -417,8 +391,11 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
 
   Future<void> _showCategoryEditor({CategoryModel? existing}) async {
     final nameController = TextEditingController(text: existing?.name ?? '');
-    Color color = existing?.color ?? _palette.first;
-    IconData icon = existing?.iconData ?? _iconOptions.first;
+    final defaultColor = _colorFamilies.first.shade500;
+    Color color = existing?.color ?? defaultColor;
+    MaterialColor selectedFamily = _matchColorFamily(color);
+    IconData icon = existing?.iconData ??
+        (commonIcons.isNotEmpty ? commonIcons.first : Icons.category);
     String derivedGroup = _deriveGroupFromName(nameController.text);
     bool enabled = existing?.enabled ?? true;
 
@@ -453,30 +430,138 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                     ),
                   ),
                   const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '颜色（先选色系，再选梯度）',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
                   Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: _palette
-                        .map(
-                          (c) => GestureDetector(
-                            onTap: () => setDialogState(() => color = c),
-                            child: Container(
-                              width: 30,
-                              height: 30,
-                              decoration: BoxDecoration(
-                                color: c,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: color == c
-                                      ? Colors.black
-                                      : Colors.transparent,
-                                  width: 2,
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: _colorFamilies.map((family) {
+                      final baseShade = family.shade500;
+                      final isActiveFamily = selectedFamily == family;
+                      return GestureDetector(
+                        onTap: () => setDialogState(() {
+                          selectedFamily = family;
+                          color = family.shade500;
+                        }),
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: baseShade,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isActiveFamily
+                                  ? Theme.of(context).colorScheme.onSurface
+                                  : Colors.transparent,
+                              width: 2,
+                            ),
+                            boxShadow: isActiveFamily
+                                ? [
+                                    BoxShadow(
+                                      color: baseShade.withOpacity(0.35),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ]
+                                : null,
+                          ),
+                          child: isActiveFamily
+                              ? const Icon(
+                                  Icons.expand_more,
+                                  color: Colors.white,
+                                  size: 18,
+                                )
+                              : null,
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 10),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    child: Container(
+                      key: ValueKey<int>(selectedFamily.value),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 8,
+                        horizontal: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surfaceVariant
+                            .withOpacity(
+                          Theme.of(context).brightness == Brightness.dark
+                              ? 0.32
+                              : 0.48,
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: selectedFamily.shade500.withOpacity(0.85),
+                        ),
+                      ),
+                      child: Wrap(
+                        spacing: 10,
+                        children: _shadeCandidates(selectedFamily)
+                            .map(
+                              (shade) => GestureDetector(
+                                onTap: () => setDialogState(() {
+                                  color = shade;
+                                }),
+                                child: Container(
+                                  width: 36,
+                                  height: 36,
+                                  decoration: BoxDecoration(
+                                    color: shade,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: color.value == shade.value
+                                          ? Theme.of(
+                                              context,
+                                            ).colorScheme.onSurface
+                                          : Colors.transparent,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  child: color.value == shade.value
+                                      ? const Icon(
+                                          Icons.check,
+                                          color: Colors.white,
+                                          size: 18,
+                                        )
+                                      : null,
                                 ),
                               ),
-                            ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Theme.of(context).dividerColor,
                           ),
-                        )
-                        .toList(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '当前色阶：${colorToHex(color)}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   Align(

@@ -1,11 +1,7 @@
-## 增加功能
-
-新建一个文件存储类似这样的约 110 个常用 Material 图标的列表。
 import 'package:flutter/material.dart';
 
-// 这是一个包含约 110 个常用 Material 图标的列表
-// 专为时间记录、习惯养成、待办事项类 App 挑选
-final List<IconData> commonIcons = [
+/// 约 110 个常用的 Material 图标，方便时间记录/习惯类场景选取。
+const List<IconData> commonIcons = [
   // --- 基础/通用 ---
   Icons.access_time, // 时间
   Icons.timer, // 计时
@@ -122,27 +118,3 @@ final List<IconData> commonIcons = [
   Icons.notifications, // 提醒
   Icons.settings, // 设置
 ];
-
-修改icon对齐上面给出的。
-
-主要修改活动管理界面的活动新增和修改的颜色和图标部分。
-选择颜色部分，先提供一个大致分类的颜色框，点击之后，弹出一个颜色框，下有四个色差接近的颜色作为进一步细分。第一级（大类）： 直接使用 MaterialColor 的主色（通常是 .shade500）。第二级（细分）： 当用户选中蓝色时，我们自动从蓝色中提取 4 个梯度的颜色。
-
- 核心策略：如何生成这“两级”颜色？
-我们利用 Flutter 内置的 Material 调色板。 比如 Colors.blue 并不是一个单一颜色，它是一个包含从 blue[50] (极浅) 到 blue[900] (极深) 的集合。
-
-第一级（大类）： 直接使用 MaterialColor 的主色（通常是 .shade500）。
-
-第二级（细分）： 当用户选中蓝色时，我们自动从蓝色中提取 4 个梯度的颜色。
-
-推荐的 4 个梯度取值：
-
-shade300 (亮色)
-
-shade500 (标准色)
-
-shade700 (深色)
-
-shade900 (极深色)
-
-
