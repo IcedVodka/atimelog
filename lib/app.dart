@@ -85,13 +85,6 @@ class _AtimeLogAppState extends State<AtimeLogApp>
     if (!isDesktop) {
       return;
     }
-    try {
-      if (widget.controller.currentActivity != null) {
-        await widget.controller.stopCurrentActivity(pushToRecent: true);
-      }
-    } catch (error) {
-      debugPrint('退出前归档计时失败: $error');
-    }
     await trayManager.destroy();
     await windowManager.setPreventClose(false);
     if (Platform.isLinux) {

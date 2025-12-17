@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
 import '../models/time_models.dart';
@@ -491,10 +493,16 @@ class TimeTrackingController extends ChangeNotifier {
     return map.map((key, value) => MapEntry(key, Duration(seconds: value)));
   }
 
-  Future<File> createBackup() async {
-    final file = await _storage.createBackupZip();
+  Future<String> suggestedBackupPath() async {
+    final base = await _storage.baseDir();
+    final name =
+        'atimelog_backup_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.zip';
+    return p.join(base.parent.path, name);
+  }
+
+  Future<File> createBackup({String? targetPath}) async {
+    final file = await _storage.createBackupZip(targetPath: targetPath);
     _settings = _settings.copyWith(lastBackupPath: file.path);
-    await _storage.saveSettings(_settings);
     notifyListeners();
     return file;
   }
@@ -503,6 +511,14 @@ class TimeTrackingController extends ChangeNotifier {
     await _storage.restoreBackup(path);
     _session = await _storage.loadSession();
     _categories = await _storage.loadCategories();
+    _settings = (await _storage.loadSettings()).copyWith(
+      lastRestorePath: path,
+      lastBackupPath: _settings.lastBackupPath,
+    );
+    if (_session.current != null) {
+      _startTicker();
+      await _checkMidnightSplit();
+    }
     notifyListeners();
   }
 

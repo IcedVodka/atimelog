@@ -9,6 +9,8 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/time_models.dart';
 
+typedef _CategoryConfig = ({List<CategoryModel> categories, bool darkMode});
+
 /// 负责所有本地 JSON 文件读写逻辑。
 class TimeStorageService {
   TimeStorageService({this.deviceId = 'demo-device'});
@@ -39,21 +41,27 @@ class TimeStorageService {
 
   Future<Directory> baseDir() => _ensureBaseDir();
 
-  Future<Directory> _configDir() async {
+  Future<Directory> _localDir() async {
     final base = await _ensureBaseDir();
-    final config = Directory(p.join(base.path, 'config'));
-    if (!await config.exists()) {
-      await config.create(recursive: true);
+    final local = Directory(p.join(base.path, 'local'));
+    if (!await local.exists()) {
+      await local.create(recursive: true);
     }
-    return config;
+    return local;
+  }
+
+  Future<File> _legacyCategoriesFile() async {
+    final base = await _ensureBaseDir();
+    return File(p.join(base.path, 'config', 'categories.json'));
+  }
+
+  Future<File> _legacySettingsFile() async {
+    final base = await _ensureBaseDir();
+    return File(p.join(base.path, 'config', 'settings.json'));
   }
 
   Future<File> _currentSessionFile() async {
-    final base = await _ensureBaseDir();
-    final localDir = Directory(p.join(base.path, 'local'));
-    if (!await localDir.exists()) {
-      await localDir.create(recursive: true);
-    }
+    final localDir = await _localDir();
     return File(p.join(localDir.path, 'current_session.json'));
   }
 
@@ -192,83 +200,134 @@ class TimeStorageService {
   }
 
   Future<File> _categoriesFile() async {
-    final config = await _configDir();
-    return File(p.join(config.path, 'categories.json'));
+    final local = await _localDir();
+    final target = File(p.join(local.path, 'categories.json'));
+    if (!await target.exists()) {
+      final legacy = await _legacyCategoriesFile();
+      if (await legacy.exists()) {
+        await target.create(recursive: true);
+        await target.writeAsBytes(await legacy.readAsBytes());
+      }
+    }
+    return target;
   }
 
-  Future<List<CategoryModel>> loadCategories() async {
-    final file = await _categoriesFile();
-    if (!await file.exists() || (await file.length()) == 0) {
-      final defaults = _defaultCategories().map(_normalizeCategory).toList();
-      await saveCategories(defaults);
-      return defaults;
+  Future<bool?> _loadLegacyDarkMode() async {
+    final legacyFile = await _legacySettingsFile();
+    if (!await legacyFile.exists()) {
+      return null;
     }
-    final content = await file.readAsString();
+    final content = await legacyFile.readAsString();
     if (content.trim().isEmpty) {
-      final defaults = _defaultCategories().map(_normalizeCategory).toList();
-      await saveCategories(defaults);
-      return defaults;
+      return null;
     }
     final decoded = jsonDecode(content);
-    List<dynamic> rawItems;
     if (decoded is Map<String, dynamic>) {
-      rawItems = decoded['items'] as List<dynamic>? ?? <dynamic>[];
-    } else if (decoded is List<dynamic>) {
-      rawItems = decoded;
-    } else {
-      rawItems = <dynamic>[];
+      return decoded['darkMode'] as bool?;
+    }
+    return null;
+  }
+
+  Future<_CategoryConfig> _loadCategoryConfig({
+    bool ensureDefaults = true,
+  }) async {
+    final file = await _categoriesFile();
+    Map<String, dynamic>? mapContent;
+
+    if (await file.exists()) {
+      final content = await file.readAsString();
+      if (content.trim().isNotEmpty) {
+        final decoded = jsonDecode(content);
+        if (decoded is Map<String, dynamic>) {
+          mapContent = decoded;
+        } else if (decoded is List<dynamic>) {
+          mapContent = {'items': decoded};
+        }
+      }
     }
 
-    final list = rawItems
+    final rawItems = mapContent?['items'] as List<dynamic>? ?? <dynamic>[];
+    bool? darkMode = mapContent?['darkMode'] as bool?;
+    darkMode ??= await _loadLegacyDarkMode();
+
+    var categories = rawItems
         .map((e) => CategoryModel.fromJson(e as Map<String, dynamic>))
         .map(_normalizeCategory)
         .toList();
-    if (list.isEmpty) {
-      final defaults = _defaultCategories().map(_normalizeCategory).toList();
-      await saveCategories(defaults);
-      return defaults;
+    if (categories.isEmpty && ensureDefaults) {
+      categories = _defaultCategories().map(_normalizeCategory).toList();
+      final resolvedDark = darkMode ?? false;
+      await _writeCategoryConfig(
+        categories: categories,
+        darkMode: resolvedDark,
+      );
+      return (categories: categories, darkMode: resolvedDark);
     }
-    list.sort((a, b) => a.order.compareTo(b.order));
-    return list;
+    categories.sort((a, b) => a.order.compareTo(b.order));
+    return (
+      categories: categories,
+      darkMode: darkMode ?? false,
+    );
   }
 
-  Future<void> saveCategories(List<CategoryModel> categories) async {
+  Future<void> _writeCategoryConfig({
+    required List<CategoryModel> categories,
+    required bool darkMode,
+  }) async {
     final file = await _categoriesFile();
-    final normalized = categories.map(_normalizeCategory).toList();
-    final payload = [...normalized]..sort((a, b) => a.order.compareTo(b.order));
+    final normalized = categories.map(_normalizeCategory).toList()
+      ..sort((a, b) => a.order.compareTo(b.order));
     await file.writeAsString(
       prettyJson({
         'lastUpdated': DateTime.now().millisecondsSinceEpoch,
-        'items': payload.map((e) => e.toJson()).toList(),
+        'darkMode': darkMode,
+        'items': normalized.map((e) => e.toJson()).toList(),
       }),
     );
   }
 
+  Future<List<CategoryModel>> loadCategories() async {
+    final config = await _loadCategoryConfig();
+    if (config.categories.isEmpty) {
+      final defaults = _defaultCategories().map(_normalizeCategory).toList();
+      await _writeCategoryConfig(
+        categories: defaults,
+        darkMode: config.darkMode,
+      );
+      return defaults;
+    }
+    return config.categories;
+  }
+
+  Future<void> saveCategories(List<CategoryModel> categories) async {
+    final normalized = categories.map(_normalizeCategory).toList();
+    final config = await _loadCategoryConfig(ensureDefaults: false);
+    await _writeCategoryConfig(
+      categories: normalized,
+      darkMode: config.darkMode,
+    );
+  }
+
   Future<AppSettings> loadSettings() async {
-    final file = await _settingsFile();
-    if (!await file.exists()) {
-      final defaults = AppSettings.defaults();
-      await saveSettings(defaults);
-      return defaults;
+    final config = await _loadCategoryConfig();
+    if (config.categories.isEmpty) {
+      await _writeCategoryConfig(
+        categories: _defaultCategories().map(_normalizeCategory).toList(),
+        darkMode: config.darkMode,
+      );
     }
-    final content = await file.readAsString();
-    if (content.trim().isEmpty) {
-      final defaults = AppSettings.defaults();
-      await saveSettings(defaults);
-      return defaults;
-    }
-    final jsonMap = jsonDecode(content) as Map<String, dynamic>;
-    return AppSettings.fromJson(jsonMap);
+    return AppSettings(darkMode: config.darkMode);
   }
 
   Future<void> saveSettings(AppSettings settings) async {
-    final file = await _settingsFile();
-    await file.writeAsString(prettyJson(settings.toJson()));
-  }
-
-  Future<File> _settingsFile() async {
-    final config = await _configDir();
-    return File(p.join(config.path, 'settings.json'));
+    final config = await _loadCategoryConfig();
+    final categories = config.categories.isEmpty
+        ? _defaultCategories().map(_normalizeCategory).toList()
+        : config.categories;
+    await _writeCategoryConfig(
+      categories: categories,
+      darkMode: settings.darkMode,
+    );
   }
 
   CategoryModel _normalizeCategory(CategoryModel category) {
@@ -413,7 +472,7 @@ class TimeStorageService {
     ];
   }
 
-  Future<File> createBackupZip() async {
+  Future<File> createBackupZip({String? targetPath}) async {
     final base = await _ensureBaseDir();
     final archive = Archive();
 
@@ -430,7 +489,19 @@ class TimeStorageService {
     final zipped = encoder.encode(archive);
     final name =
         'atimelog_backup_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.zip';
-    final outFile = File(p.join(base.parent.path, name));
+    final resolvedPath = () {
+      final trimmed = targetPath?.trim();
+      if (trimmed == null || trimmed.isEmpty) {
+        return p.join(base.parent.path, name);
+      }
+      final looksLikeFile = trimmed.toLowerCase().endsWith('.zip');
+      if (looksLikeFile) {
+        return trimmed;
+      }
+      return p.join(trimmed, name);
+    }();
+    final outFile = File(resolvedPath);
+    await outFile.parent.create(recursive: true);
     await outFile.writeAsBytes(zipped ?? <int>[]);
     return outFile;
   }

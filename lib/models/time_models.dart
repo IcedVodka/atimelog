@@ -322,26 +322,38 @@ String prettyJson(Map<String, dynamic> payload) {
 
 /// 应用基础设置。
 class AppSettings {
-  const AppSettings({required this.darkMode, this.lastBackupPath});
+  const AppSettings({
+    required this.darkMode,
+    this.lastBackupPath,
+    this.lastRestorePath,
+  });
 
   final bool darkMode;
   final String? lastBackupPath;
+  final String? lastRestorePath;
 
-  AppSettings copyWith({bool? darkMode, String? lastBackupPath}) {
+  AppSettings copyWith({
+    bool? darkMode,
+    String? lastBackupPath,
+    String? lastRestorePath,
+  }) {
     return AppSettings(
       darkMode: darkMode ?? this.darkMode,
       lastBackupPath: lastBackupPath ?? this.lastBackupPath,
+      lastRestorePath: lastRestorePath ?? this.lastRestorePath,
     );
   }
 
   Map<String, dynamic> toJson() {
-    return {'darkMode': darkMode, 'lastBackupPath': lastBackupPath};
+    // 仅保留主题配置，备份/恢复路径不再持久化。
+    return {'darkMode': darkMode};
   }
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
     return AppSettings(
       darkMode: json['darkMode'] as bool? ?? false,
       lastBackupPath: json['lastBackupPath'] as String?,
+      lastRestorePath: json['lastRestorePath'] as String?,
     );
   }
 

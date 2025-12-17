@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../../models/time_models.dart';
@@ -120,17 +122,17 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
   }
 
   int _resolveCrossAxisCount(double width) {
-    if (width >= 1080) return 4;
-    if (width >= 860) return 3;
-    return 2;
+    final count = (width / 100).floor();
+    return max(4, min(8, count));
   }
 
-  Future<void> _handleGridReorder(
-    int from,
-    int to,
-    List<CategoryModel> categories,
-  ) async {
-    if (from == to) {
+  Future<void> _handleGridReorder({
+    required String fromId,
+    required int to,
+    required List<CategoryModel> categories,
+  }) async {
+    final from = categories.indexWhere((element) => element.id == fromId);
+    if (from == -1 || from == to) {
       return;
     }
     final updated = [...categories];
@@ -144,11 +146,12 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     required List<CategoryModel> categories,
     required int index,
     required double itemWidth,
+    required double itemHeight,
   }) {
     final cat = categories[index];
     final groupLabel = _deriveGroupFromName(cat.name);
-    Widget buildCard({required bool ghost, required bool isTargeted}) {
-      return _categoryCard(
+    Widget buildTile({required bool ghost, required bool isTargeted}) {
+      return _categoryTile(
         cat,
         groupLabel: groupLabel,
         ghost: ghost,
@@ -157,32 +160,38 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
       );
     }
 
-    final placeholder = buildCard(ghost: true, isTargeted: false);
-
-    return Draggable<int>(
-      data: index,
+    return LongPressDraggable<String>(
+      data: cat.id,
+      maxSimultaneousDrags: 1,
+      hapticFeedbackOnStart: true,
       dragAnchorStrategy: pointerDragAnchorStrategy,
       feedback: Material(
         color: Colors.transparent,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: itemWidth, minWidth: itemWidth),
-          child: buildCard(ghost: false, isTargeted: true),
+        child: SizedBox(
+          width: itemWidth,
+          height: itemHeight,
+          child: buildTile(ghost: false, isTargeted: true),
         ),
       ),
       onDragStarted: () => setState(() => _draggingIndex = index),
-      onDraggableCanceled: (_, unusedVelocity) =>
-          setState(() => _draggingIndex = null),
+      onDraggableCanceled: (_, __) => setState(() => _draggingIndex = null),
       onDragEnd: (_) => setState(() => _draggingIndex = null),
       childWhenDragging: Opacity(
-        opacity: 0.25,
-        child: IgnorePointer(child: placeholder),
+        opacity: 0.22,
+        child: IgnorePointer(
+          child: buildTile(ghost: true, isTargeted: false),
+        ),
       ),
-      child: DragTarget<int>(
-        onWillAccept: (from) => from != null && from != index,
-        onAccept: (from) => _handleGridReorder(from, index, categories),
+      child: DragTarget<String>(
+        onWillAccept: (from) => from != null && from != cat.id,
+        onAccept: (fromId) => _handleGridReorder(
+          fromId: fromId,
+          to: index,
+          categories: categories,
+        ),
         builder: (context, candidate, rejected) {
           final isTargeted = candidate.isNotEmpty;
-          return buildCard(ghost: false, isTargeted: isTargeted);
+          return buildTile(ghost: false, isTargeted: isTargeted);
         },
       ),
     );
@@ -223,7 +232,7 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    '按住卡片或右上角拖拽图标即可排序 · 栅格自适应宽度填充屏幕',
+                    '长按卡片即可拖动排序 · 布局与分类网格一致，依然支持新增和编辑',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
@@ -234,16 +243,19 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                     final crossAxisCount = _resolveCrossAxisCount(
                       constraints.maxWidth,
                     );
+                    const spacing = 10.0;
+                    const tileAspectRatio = 0.78;
                     final itemWidth =
-                        (constraints.maxWidth - (crossAxisCount - 1) * 12) /
+                        (constraints.maxWidth - (crossAxisCount - 1) * spacing) /
                         crossAxisCount;
+                    final itemHeight = itemWidth / tileAspectRatio;
                     return GridView.builder(
                       padding: const EdgeInsets.fromLTRB(12, 0, 12, 90),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                        childAspectRatio: 1.55,
+                        mainAxisSpacing: spacing,
+                        crossAxisSpacing: spacing,
+                        childAspectRatio: tileAspectRatio,
                       ),
                       itemCount: categories.length,
                       itemBuilder: (context, index) {
@@ -251,6 +263,7 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                           categories: categories,
                           index: index,
                           itemWidth: itemWidth,
+                          itemHeight: itemHeight,
                         );
                       },
                     );
@@ -264,7 +277,7 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     );
   }
 
-  Widget _categoryCard(
+  Widget _categoryTile(
     CategoryModel cat, {
     required String groupLabel,
     bool isTargeted = false,
@@ -274,108 +287,125 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     final resolvedGroup = groupLabel.isEmpty ? cat.name : groupLabel;
     final theme = Theme.of(context);
     final isDeleted = cat.deleted;
+    final isDisabled = !cat.enabled;
+    final baseColor = cat.color;
+    final displayColor =
+        (isDisabled || isDeleted) ? baseColor.withOpacity(0.45) : baseColor;
     final borderColor = isTargeted
         ? theme.colorScheme.primary
-        : cat.color.withOpacity(0.25);
+        : displayColor.withOpacity(0.55);
+    final background = ghost
+        ? theme.colorScheme.surfaceVariant.withOpacity(0.18)
+        : theme.colorScheme.surfaceVariant.withOpacity(
+            theme.brightness == Brightness.dark ? 0.36 : 0.52,
+          );
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       decoration: BoxDecoration(
-        color: ghost
-            ? theme.colorScheme.surfaceVariant.withOpacity(0.2)
-            : theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(14),
+        color: background,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor, width: isTargeted ? 1.6 : 1),
         boxShadow: dragging
             ? [
                 BoxShadow(
                   color: theme.colorScheme.primary.withOpacity(0.14),
-                  blurRadius: 16,
+                  blurRadius: 14,
                   offset: const Offset(0, 8),
                 ),
               ]
             : [],
       ),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                backgroundColor: cat.color.withOpacity(0.12),
-                child: Icon(cat.iconData, color: cat.color),
+              Icon(
+                Icons.drag_indicator,
+                size: 18,
+                color: theme.textTheme.bodySmall?.color,
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            cat.name,
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Icon(
-                          Icons.drag_indicator,
-                          size: 18,
-                          color: theme.textTheme.bodySmall?.color,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    if (isDeleted)
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 4),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.redAccent.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          '已删除（仅配置文件）',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: Colors.redAccent,
-                          ),
-                        ),
-                      ),
-                    Text(
-                      resolvedGroup,
-                      style: theme.textTheme.bodySmall,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
+              const Spacer(),
+              IconButton(
+                tooltip: cat.enabled ? '停用该分类' : '启用该分类',
+                icon: Icon(
+                  cat.enabled ? Icons.visibility : Icons.visibility_off,
+                  size: 18,
+                  color:
+                      cat.enabled ? theme.colorScheme.primary : theme.disabledColor,
                 ),
-              ),
-              Switch(
-                value: cat.enabled,
-                onChanged: isDeleted
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                visualDensity: VisualDensity.compact,
+                onPressed: isDeleted
                     ? null
-                    : (val) => widget.controller.toggleCategory(cat.id, val),
+                    : () => widget.controller.toggleCategory(
+                          cat.id,
+                          !cat.enabled,
+                        ),
+              ),
+              IconButton(
+                tooltip: '编辑',
+                icon: const Icon(Icons.edit, size: 18),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _showCategoryEditor(existing: cat),
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Text('顺序 ${cat.order}', style: theme.textTheme.bodySmall),
-              const Spacer(),
-              IconButton(
-                tooltip: '编辑',
-                icon: const Icon(Icons.edit),
-                onPressed: () => _showCategoryEditor(existing: cat),
+          const SizedBox(height: 4),
+          CircleAvatar(
+            backgroundColor: displayColor.withOpacity(0.12),
+            child: Icon(cat.iconData, color: displayColor),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            cat.name,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (resolvedGroup.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                resolvedGroup,
+                style: theme.textTheme.labelSmall,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
+            ),
+          if (isDisabled || isDeleted)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                isDeleted ? '已删除（配置文件）' : '已停用',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: isDeleted ? Colors.redAccent : theme.disabledColor,
+                ),
+              ),
+            ),
+          const Spacer(),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
               IconButton(
                 tooltip: '删除（从配置移除，不影响历史数据）',
-                icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                icon: const Icon(
+                  Icons.delete_outline,
+                  color: Colors.redAccent,
+                  size: 18,
+                ),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                visualDensity: VisualDensity.compact,
                 onPressed: () => _deleteCategory(cat),
               ),
             ],
