@@ -1,7 +1,9 @@
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
+import '../../models/sync_models.dart';
 import '../../services/time_tracking_controller.dart';
 
 class SettingsTab extends StatefulWidget {
@@ -16,6 +18,14 @@ class SettingsTab extends StatefulWidget {
 class _SettingsTabState extends State<SettingsTab> {
   String? _backupPathInput;
   String? _restorePathInput;
+  late final TextEditingController _serverController;
+  late final TextEditingController _usernameController;
+  late final TextEditingController _passwordController;
+  late final TextEditingController _remotePathController;
+  double _autoIntervalMinutes = 30;
+  bool _autoSyncEnabled = false;
+  bool _savingSync = false;
+  bool _showPassword = false;
 
   String? get _backupPath =>
       _backupPathInput ?? widget.controller.settings.lastBackupPath;
@@ -24,66 +34,330 @@ class _SettingsTabState extends State<SettingsTab> {
       _restorePathInput ?? widget.controller.settings.lastRestorePath;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SafeArea(
-      child: ListView(
-        primary: false,
+  void initState() {
+    super.initState();
+    final sync = widget.controller.syncConfig;
+    _serverController = TextEditingController(text: sync.serverUrl);
+    _usernameController = TextEditingController(text: sync.username);
+    _passwordController = TextEditingController(text: sync.password);
+    _remotePathController = TextEditingController(text: sync.remotePath);
+    _autoIntervalMinutes =
+        sync.autoIntervalMinutes > 0 ? sync.autoIntervalMinutes.toDouble() : 30;
+    _autoSyncEnabled = sync.enabled;
+  }
+
+  @override
+  void dispose() {
+    _serverController.dispose();
+    _usernameController.dispose();
+    _passwordController.dispose();
+    _remotePathController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _applySyncConfig({bool triggerSync = false}) async {
+    final config = SyncConfig(
+      enabled: _autoSyncEnabled,
+      serverUrl: _serverController.text.trim(),
+      username: _usernameController.text.trim(),
+      password: _passwordController.text,
+      remotePath: _remotePathController.text.trim().isEmpty
+          ? '/atimelog_data'
+          : _remotePathController.text.trim(),
+      autoIntervalMinutes: _autoIntervalMinutes.round(),
+    );
+    setState(() => _savingSync = true);
+    try {
+      await widget.controller.updateSyncConfig(
+        config,
+        triggerSync: triggerSync,
+      );
+    } catch (error) {
+      _showSnack(error.toString());
+    } finally {
+      if (mounted) setState(() => _savingSync = false);
+    }
+  }
+
+  String _syncStatusLabel(SyncStatus status) {
+    if (status.syncing) {
+      return '同步中...';
+    }
+    if (status.lastSyncSucceeded == true) {
+      return '上次同步成功';
+    }
+    if (status.lastSyncSucceeded == false) {
+      return '上次同步失败';
+    }
+    return '尚未同步';
+  }
+
+  Future<void> _handleManualSync() async {
+    await _applySyncConfig();
+    await widget.controller.syncNow(
+      manual: true,
+      reason: '设置页手动同步',
+    );
+  }
+
+  Future<void> _handleVerify() async {
+    await _applySyncConfig();
+    await widget.controller.verifySyncConnection();
+  }
+
+  Widget _buildSyncCard(ThemeData theme) {
+    final status = widget.controller.syncStatus;
+    final statusLabel = _syncStatusLabel(status);
+    final timeText = status.lastSyncTime != null
+        ? DateFormat('MM-dd HH:mm').format(status.lastSyncTime!)
+        : '暂无记录';
+    final message = status.lastSyncMessage ?? '点击同步或验证连接';
+    final autoLabel = _autoSyncEnabled
+        ? '每 ${_autoIntervalMinutes.round()} 分钟自动同步'
+        : '自动同步已关闭';
+
+    return Card(
+      child: Padding(
         padding: const EdgeInsets.all(16),
-        children: [
-          SwitchListTile(
-            value: widget.controller.settings.darkMode,
-            onChanged: (val) => widget.controller.toggleTheme(val),
-            title: const Text('暗色模式'),
-            subtitle: const Text('切换亮/暗主题'),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  _buildActionRow(
-                    context: context,
-                    icon: Icons.backup_outlined,
-                    iconColor: theme.colorScheme.primary,
-                    title: '备份 /atimelog_data',
-                    subtitle: '生成压缩包，路径仅在本次运行有效',
-                    pathLabel: '备份保存路径',
-                    pathValue: _backupPath,
-                    actionLabel: '备份',
-                    tonalAction: false,
-                    onPickPath: () => _pickBackupPath(),
-                    onAction: _handleBackup,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.cloud_outlined),
+                const SizedBox(width: 8),
+                Text(
+                  'WebDAV 同步',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
                   ),
-                  const Divider(height: 24),
-                  _buildActionRow(
-                    context: context,
-                    icon: Icons.restore,
-                    iconColor: theme.colorScheme.secondary,
-                    title: '恢复备份',
-                    subtitle: '指定 zip 文件恢复，不会覆盖备份路径',
-                    pathLabel: '恢复文件路径',
-                    pathValue: _restorePath,
-                    actionLabel: '恢复',
-                    tonalAction: true,
-                    onPickPath: () => _pickRestorePath(),
-                    onAction: _handleRestore,
+                ),
+                const Spacer(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                ],
+                  child: Text(
+                    statusLabel,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: status.lastSyncSucceeded == false
+                          ? theme.colorScheme.error
+                          : theme.colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _serverController,
+              onEditingComplete: _applySyncConfig,
+              decoration: const InputDecoration(
+                labelText: 'WebDAV 服务器地址',
+                hintText: '例如 https://dav.example.com/remote.php/dav/files/me',
               ),
             ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.info_outline),
-              title: const Text('关于'),
-              subtitle: const Text('AtimeLog Phase 2 Demo'),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _remotePathController,
+              onEditingComplete: _applySyncConfig,
+              decoration: const InputDecoration(
+                labelText: '远程存储路径',
+                hintText: '/atimelog_data',
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _usernameController,
+                    onEditingComplete: _applySyncConfig,
+                    decoration: const InputDecoration(labelText: '用户名'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _passwordController,
+                    obscureText: !_showPassword,
+                    onEditingComplete: _applySyncConfig,
+                    decoration: InputDecoration(
+                      labelText: '密码 / 应用密钥',
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _showPassword
+                              ? Icons.visibility
+                              : Icons.visibility_off,
+                        ),
+                        onPressed: () => setState(
+                          () => _showPassword = !_showPassword,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              value: _autoSyncEnabled,
+              onChanged: (val) {
+                setState(() => _autoSyncEnabled = val);
+                _applySyncConfig();
+              },
+              title: const Text('开启自动同步'),
+              subtitle: Text(autoLabel),
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: Slider(
+                    value: _autoIntervalMinutes,
+                    onChanged: _autoSyncEnabled
+                        ? (val) => setState(
+                              () => _autoIntervalMinutes = val,
+                            )
+                        : null,
+                    onChangeEnd: _autoSyncEnabled
+                        ? (_) => _applySyncConfig()
+                        : null,
+                    min: 5,
+                    max: 180,
+                    divisions: 35,
+                    label: '${_autoIntervalMinutes.round()} 分钟',
+                  ),
+                ),
+                SizedBox(
+                  width: 70,
+                  child: Text(
+                    '${_autoIntervalMinutes.round()} 分钟',
+                    textAlign: TextAlign.end,
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed:
+                        status.verifying || _savingSync ? null : _handleVerify,
+                    icon: status.verifying
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.check_circle_outline),
+                    label: Text(status.verifying ? '验证中' : '验证连接'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed:
+                        status.syncing || _savingSync ? null : _handleManualSync,
+                    icon: status.syncing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.sync),
+                    label: Text(status.syncing ? '同步中...' : '立即同步'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              '最近：$timeText · $message · '
+              '↑${status.lastUploadCount} ↓${status.lastDownloadCount}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
       ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: widget.controller,
+      builder: (context, _) {
+        final theme = Theme.of(context);
+        return SafeArea(
+          child: ListView(
+            primary: false,
+            padding: const EdgeInsets.all(16),
+            children: [
+              _buildSyncCard(theme),
+              const SizedBox(height: 12),
+              SwitchListTile(
+                value: widget.controller.settings.darkMode,
+                onChanged: (val) => widget.controller.toggleTheme(val),
+                title: const Text('暗色模式'),
+                subtitle: const Text('切换亮/暗主题'),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      _buildActionRow(
+                        context: context,
+                        icon: Icons.backup_outlined,
+                        iconColor: theme.colorScheme.primary,
+                        title: '备份 /atimelog_data',
+                        subtitle: '生成压缩包，路径仅在本次运行有效',
+                        pathLabel: '备份保存路径',
+                        pathValue: _backupPath,
+                        actionLabel: '备份',
+                        tonalAction: false,
+                        onPickPath: () => _pickBackupPath(),
+                        onAction: _handleBackup,
+                      ),
+                      const Divider(height: 24),
+                      _buildActionRow(
+                        context: context,
+                        icon: Icons.restore,
+                        iconColor: theme.colorScheme.secondary,
+                        title: '恢复备份',
+                        subtitle: '指定 zip 文件恢复，不会覆盖备份路径',
+                        pathLabel: '恢复文件路径',
+                        pathValue: _restorePath,
+                        actionLabel: '恢复',
+                        tonalAction: true,
+                        onPickPath: () => _pickRestorePath(),
+                        onAction: _handleRestore,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.info_outline),
+                  title: const Text('关于'),
+                  subtitle: const Text('AtimeLog Phase 2 Demo'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

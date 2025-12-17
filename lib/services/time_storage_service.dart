@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../models/sync_models.dart';
 import '../models/time_models.dart';
 
 typedef _CategoryConfig = ({List<CategoryModel> categories, bool darkMode});
@@ -40,14 +41,41 @@ class TimeStorageService {
   }
 
   Future<Directory> baseDir() => _ensureBaseDir();
+  Future<Directory> currentDir() => _currentDir();
 
-  Future<Directory> _localDir() async {
+  Future<Directory> _currentDir() async {
     final base = await _ensureBaseDir();
-    final local = Directory(p.join(base.path, 'local'));
-    if (!await local.exists()) {
-      await local.create(recursive: true);
+    final current = Directory(p.join(base.path, 'current'));
+    if (!await current.exists()) {
+      final legacy = Directory(p.join(base.path, 'local'));
+      if (await legacy.exists()) {
+        try {
+          await legacy.rename(current.path);
+        } catch (_) {
+          await current.create(recursive: true);
+          await for (final entity
+              in legacy.list(recursive: true, followLinks: false)) {
+            if (entity is! File) continue;
+            final relative = p.relative(entity.path, from: legacy.path);
+            final target = File(p.join(current.path, relative));
+            await target.parent.create(recursive: true);
+            await target.writeAsBytes(await entity.readAsBytes());
+          }
+        }
+      } else {
+        await current.create(recursive: true);
+      }
     }
-    return local;
+    return current;
+  }
+
+  Future<Directory> _etagDir() async {
+    final base = await _ensureBaseDir();
+    final etagRoot = Directory(p.join(base.parent.path, 'etag'));
+    if (!await etagRoot.exists()) {
+      await etagRoot.create(recursive: true);
+    }
+    return etagRoot;
   }
 
   Future<File> _legacyCategoriesFile() async {
@@ -61,8 +89,8 @@ class TimeStorageService {
   }
 
   Future<File> _currentSessionFile() async {
-    final localDir = await _localDir();
-    return File(p.join(localDir.path, 'current_session.json'));
+    final currentDir = await _currentDir();
+    return File(p.join(currentDir.path, 'current_session.json'));
   }
 
   Future<CurrentSession> loadSession() async {
@@ -200,8 +228,8 @@ class TimeStorageService {
   }
 
   Future<File> _categoriesFile() async {
-    final local = await _localDir();
-    final target = File(p.join(local.path, 'categories.json'));
+    final current = await _currentDir();
+    final target = File(p.join(current.path, 'categories.json'));
     if (!await target.exists()) {
       final legacy = await _legacyCategoriesFile();
       if (await legacy.exists()) {
@@ -328,6 +356,233 @@ class TimeStorageService {
       categories: categories,
       darkMode: settings.darkMode,
     );
+  }
+
+  Future<File> _syncSettingsFile() async {
+    final current = await _currentDir();
+    return File(p.join(current.path, 'sync_settings.json'));
+  }
+
+  Future<SyncConfig> loadSyncConfig() async {
+    final file = await _syncSettingsFile();
+    if (!await file.exists()) {
+      return SyncConfig.defaults();
+    }
+    try {
+      final content = await file.readAsString();
+      if (content.trim().isEmpty) {
+        return SyncConfig.defaults();
+      }
+      final decoded = jsonDecode(content);
+      if (decoded is Map<String, dynamic>) {
+        return SyncConfig.fromJson(decoded);
+      }
+    } catch (_) {
+      // ignore malformed content
+    }
+    return SyncConfig.defaults();
+  }
+
+  Future<void> saveSyncConfig(SyncConfig config) async {
+    final file = await _syncSettingsFile();
+    await file.parent.create(recursive: true);
+    const encoder = JsonEncoder.withIndent('  ');
+    await file.writeAsString(encoder.convert(config.toJson()));
+  }
+
+  Future<File> resolveRelativeFile(String relativePath) async {
+    final base = await _ensureBaseDir();
+    return File(p.join(base.path, relativePath));
+  }
+
+  Future<String> readFileContent(String relativePath) async {
+    final file = await resolveRelativeFile(relativePath);
+    if (!await file.exists()) {
+      return '';
+    }
+    return file.readAsString();
+  }
+
+  Future<void> writeFileContent(String relativePath, String content) async {
+    final file = await resolveRelativeFile(relativePath);
+    await file.parent.create(recursive: true);
+    await file.writeAsString(content);
+  }
+
+  Future<List<String>> getLocalMonthFolders() async {
+    final base = await _ensureBaseDir();
+    final dataDir = Directory(p.join(base.path, 'data'));
+    if (!await dataDir.exists()) {
+      return const [];
+    }
+    final items = <String>[];
+    await for (final entity in dataDir.list(followLinks: false)) {
+      if (entity is! Directory) continue;
+      final name = p.basename(entity.path);
+      if (RegExp(r'^\d{6}$').hasMatch(name)) {
+        items.add(name);
+      }
+    }
+    items.sort();
+    return items;
+  }
+
+  Future<List<String>> getLocalFilesInMonth(String month) async {
+    final base = await _ensureBaseDir();
+    final dir = Directory(p.join(base.path, 'data', month));
+    if (!await dir.exists()) {
+      return const [];
+    }
+    final files = <String>[];
+    await for (final entity in dir.list(followLinks: false)) {
+      if (entity is! File) continue;
+      final name = p.basename(entity.path);
+      if (name.toLowerCase().endsWith('.json')) {
+        files.add(name);
+      }
+    }
+    files.sort();
+    return files;
+  }
+
+  Future<List<String>> getLocalCurrentFiles() async {
+    final current = await _currentDir();
+    if (!await current.exists()) {
+      return const [];
+    }
+    final files = <String>[];
+    await for (final entity in current.list(followLinks: false)) {
+      if (entity is! File) continue;
+      final name = p.basename(entity.path);
+      if (name.toLowerCase().endsWith('.json')) {
+        files.add(name);
+      }
+    }
+    files.sort();
+    return files;
+  }
+
+  Future<int?> readLocalFileTimestamp(String relativePath) async {
+    final file = await resolveRelativeFile(relativePath);
+    if (!await file.exists()) {
+      return null;
+    }
+    try {
+      final content = await file.readAsString();
+      if (content.trim().isEmpty) {
+        return null;
+      }
+      final decoded = jsonDecode(content);
+      if (decoded is Map<String, dynamic>) {
+        final ts = decoded['lastUpdated'];
+        if (ts is int) return ts;
+        if (ts is String) return int.tryParse(ts);
+      }
+    } catch (_) {
+      // ignore parse errors
+    }
+    final stat = await file.stat();
+    return stat.modified.millisecondsSinceEpoch;
+  }
+
+  Future<File> _currentEtagFile() async {
+    final etagRoot = await _etagDir();
+    return File(p.join(etagRoot.path, 'current_etag.json'));
+  }
+
+  Future<Directory> _etagDataDir() async {
+    final etagRoot = await _etagDir();
+    final dataDir = Directory(p.join(etagRoot.path, 'etagdata'));
+    if (!await dataDir.exists()) {
+      await dataDir.create(recursive: true);
+    }
+    return dataDir;
+  }
+
+  Future<File> _monthEtagFile(String month) async {
+    final dir = await _etagDataDir();
+    return File(p.join(dir.path, '${month}_etag.json'));
+  }
+
+  Future<Map<String, String>> _readEtagMap(File file) async {
+    if (!await file.exists()) {
+      return {};
+    }
+    try {
+      final content = await file.readAsString();
+      if (content.trim().isEmpty) return {};
+      final decoded = jsonDecode(content);
+      if (decoded is Map<String, dynamic>) {
+        return decoded.map(
+          (key, value) => MapEntry(key, value?.toString() ?? ''),
+        );
+      }
+    } catch (_) {
+      // ignore malformed content
+    }
+    return {};
+  }
+
+  Future<Map<String, String>> _pruneLocalChanges(
+    Map<String, String> etags, {
+    required int etagModified,
+    required String basePrefix,
+  }) async {
+    final result = <String, String>{};
+    for (final entry in etags.entries) {
+      final relativePath =
+          basePrefix.isEmpty ? entry.key : p.join(basePrefix, entry.key);
+      final localFile = await resolveRelativeFile(relativePath);
+      if (await localFile.exists()) {
+        final localStat = await localFile.stat();
+        if (localStat.modified.millisecondsSinceEpoch > etagModified) {
+          // 本地文件在缓存 ETag 之后被修改，清理掉对应的记录。
+          continue;
+        }
+      }
+      result[entry.key] = entry.value;
+    }
+    return result;
+  }
+
+  Future<Map<String, String>> loadCurrentEtags() async {
+    final file = await _currentEtagFile();
+    if (!await file.exists()) return {};
+    final map = await _readEtagMap(file);
+    if (map.isEmpty) return {};
+    final stat = await file.stat();
+    return _pruneLocalChanges(
+      map,
+      etagModified: stat.modified.millisecondsSinceEpoch,
+      basePrefix: '',
+    );
+  }
+
+  Future<void> saveCurrentEtags(Map<String, String> data) async {
+    final file = await _currentEtagFile();
+    await file.parent.create(recursive: true);
+    const encoder = JsonEncoder.withIndent('  ');
+    await file.writeAsString(encoder.convert(data));
+  }
+
+  Future<Map<String, String>> loadMonthEtags(String month) async {
+    final file = await _monthEtagFile(month);
+    if (!await file.exists()) return {};
+    final map = await _readEtagMap(file);
+    if (map.isEmpty) return {};
+    final stat = await file.stat();
+    return _pruneLocalChanges(
+      map,
+      etagModified: stat.modified.millisecondsSinceEpoch,
+      basePrefix: 'data',
+    );
+  }
+
+  Future<void> saveMonthEtags(String month, Map<String, String> data) async {
+    final file = await _monthEtagFile(month);
+    await file.parent.create(recursive: true);
+    const encoder = JsonEncoder.withIndent('  ');
+    await file.writeAsString(encoder.convert(data));
   }
 
   CategoryModel _normalizeCategory(CategoryModel category) {

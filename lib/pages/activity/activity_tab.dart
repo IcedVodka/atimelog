@@ -547,6 +547,126 @@ class ActivityTabState extends State<ActivityTab> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Widget _buildSyncInfo() {
+    final status = widget.controller.syncStatus;
+    final config = widget.controller.syncConfig;
+    final theme = Theme.of(context);
+    final isReady = config.isConfigured;
+    String title;
+    Color titleColor;
+    if (!isReady) {
+      title = '未配置 WebDAV';
+      titleColor = theme.colorScheme.error;
+    } else if (status.syncing) {
+      title = '同步中...';
+      titleColor = theme.colorScheme.primary;
+    } else if (status.lastSyncSucceeded == false) {
+      title = '上次同步失败';
+      titleColor = theme.colorScheme.error;
+    } else if (status.lastSyncSucceeded == true) {
+      title = '上次同步成功';
+      titleColor = Colors.green.shade600;
+    } else {
+      title = '尚未同步';
+      titleColor = theme.colorScheme.onSurfaceVariant;
+    }
+    final lastTime = status.lastSyncTime != null
+        ? DateFormat('MM-dd HH:mm:ss').format(status.lastSyncTime!)
+        : '暂无';
+    final detail = status.lastSyncMessage ??
+        (status.lastSyncSucceeded == true
+            ? '最近已同步'
+            : (isReady ? '点击手动同步' : '请在更多页面填写 WebDAV 信息'));
+    final counterText = status.lastSyncSucceeded == null
+        ? ''
+        : '↑${status.lastUploadCount} ↓${status.lastDownloadCount}'
+            ' · ${status.lastDuration?.inSeconds ?? 0}s';
+
+    return Card(
+      color: theme.colorScheme.surfaceVariant.withOpacity(0.6),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: titleColor.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              padding: const EdgeInsets.all(10),
+              child: Icon(
+                Icons.cloud_sync,
+                color: titleColor,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: titleColor,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        lastTime,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    detail,
+                    style: theme.textTheme.bodyMedium,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (counterText.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      counterText,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              height: 44,
+              child: FilledButton.icon(
+                onPressed: status.syncing || !isReady
+                    ? null
+                    : () => widget.controller.syncNow(
+                          manual: true,
+                          reason: '手动同步',
+                        ),
+                icon: status.syncing
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.sync),
+                label: Text(status.syncing ? '同步中' : '手动同步'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -566,6 +686,8 @@ class ActivityTabState extends State<ActivityTab> {
             primary: false,
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
             children: [
+              _buildSyncInfo(),
+              const SizedBox(height: 12),
               _buildActiveCard(activity),
               const SizedBox(height: 12),
               _buildQuickStart(categories),

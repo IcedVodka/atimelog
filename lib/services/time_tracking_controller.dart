@@ -7,21 +7,28 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
+import '../models/sync_models.dart';
 import '../models/time_models.dart';
+import 'sync_service.dart';
 import 'time_storage_service.dart';
 
 class TimeTrackingController extends ChangeNotifier {
   TimeTrackingController(TimeStorageService storage)
     : _storage = storage,
+      _syncService = SyncService(storage),
       _session = CurrentSession.empty(deviceId: storage.deviceId);
 
   final TimeStorageService _storage;
   final Uuid _uuid = const Uuid();
+  final SyncService _syncService;
 
   CurrentSession _session;
   List<CategoryModel> _categories = const [];
   AppSettings _settings = AppSettings.defaults();
+  SyncConfig _syncConfig = SyncConfig.defaults();
+  SyncStatus _syncStatus = SyncStatus.initial();
   Timer? _ticker;
+  Timer? _autoSyncTimer;
   bool _isInitialized = false;
   bool _handlingMidnight = false;
 
@@ -34,6 +41,8 @@ class TimeTrackingController extends ChangeNotifier {
       List.unmodifiable(_categories.where((element) => !element.deleted));
   List<CategoryModel> get allCategories => List.unmodifiable(_categories);
   AppSettings get settings => _settings;
+  SyncConfig get syncConfig => _syncConfig;
+  SyncStatus get syncStatus => _syncStatus;
 
   Duration get currentDuration {
     final current = _session.current;
@@ -48,12 +57,17 @@ class TimeTrackingController extends ChangeNotifier {
     _settings = await _storage.loadSettings();
     _session = await _storage.loadSession();
     _categories = await _storage.loadCategories();
+    _syncConfig = await _storage.loadSyncConfig();
     _isInitialized = true;
     if (_session.current != null) {
       _startTicker();
       await _checkMidnightSplit();
     }
+    _scheduleAutoSync();
     notifyListeners();
+    if (_syncConfig.isConfigured) {
+      unawaited(syncNow(reason: '启动自动同步'));
+    }
   }
 
   CategoryModel? findCategory(String id) {
@@ -528,6 +542,98 @@ class TimeTrackingController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _scheduleAutoSync() {
+    _autoSyncTimer?.cancel();
+    if (!_syncConfig.shouldAutoSync) {
+      return;
+    }
+    final minutes =
+        _syncConfig.autoIntervalMinutes.clamp(1, 1440).toInt();
+    final interval = Duration(minutes: minutes);
+    _autoSyncTimer = Timer.periodic(interval, (_) {
+      if (_syncStatus.syncing || !_syncConfig.enabled) {
+        return;
+      }
+      unawaited(syncNow(reason: '自动周期同步'));
+    });
+  }
+
+  Future<void> updateSyncConfig(SyncConfig config,
+      {bool triggerSync = false}) async {
+    _syncConfig = config;
+    await _storage.saveSyncConfig(config);
+    _scheduleAutoSync();
+    notifyListeners();
+    if (triggerSync) {
+      await syncNow(reason: '配置更新后同步', manual: true);
+    }
+  }
+
+  Future<void> syncNow({bool manual = false, String? reason}) async {
+    if (_syncStatus.syncing) {
+      return;
+    }
+    if (!_syncConfig.isConfigured) {
+      _syncStatus = _syncStatus.copyWith(
+        lastSyncTime: DateTime.now(),
+        lastSyncSucceeded: false,
+        lastSyncMessage: '未完成 WebDAV 配置',
+        syncing: false,
+      );
+      notifyListeners();
+      return;
+    }
+    if (!_syncConfig.enabled && !manual) {
+      _syncStatus = _syncStatus.copyWith(
+        lastSyncTime: DateTime.now(),
+        lastSyncSucceeded: false,
+        lastSyncMessage: '自动同步已关闭',
+        syncing: false,
+      );
+      notifyListeners();
+      return;
+    }
+    _syncStatus = _syncStatus.copyWith(
+      syncing: true,
+      lastSyncMessage: reason ?? (manual ? '手动同步中' : '自动同步中'),
+    );
+    notifyListeners();
+    final result = await _syncService.syncAll(_syncConfig);
+    _syncStatus = _syncStatus.copyWith(
+      syncing: false,
+      lastSyncTime: DateTime.now(),
+      lastSyncSucceeded: result.success,
+      lastSyncMessage: result.message,
+      lastDuration: result.duration,
+      lastUploadCount: result.uploaded,
+      lastDownloadCount: result.downloaded,
+    );
+    notifyListeners();
+  }
+
+  Future<void> verifySyncConnection() async {
+    if (_syncStatus.verifying) return;
+    _syncStatus = _syncStatus.copyWith(verifying: true, lastSyncMessage: '验证中');
+    notifyListeners();
+    try {
+      await _syncService.verifyConnection(_syncConfig);
+      _syncStatus = _syncStatus.copyWith(
+        verifying: false,
+        lastSyncSucceeded: true,
+        lastSyncTime: DateTime.now(),
+        lastSyncMessage: '连接正常',
+      );
+    } catch (error) {
+      _syncStatus = _syncStatus.copyWith(
+        verifying: false,
+        lastSyncSucceeded: false,
+        lastSyncTime: DateTime.now(),
+        lastSyncMessage: error.toString(),
+      );
+    }
+    notifyListeners();
+  }
+
   Future<void> _startActivity({
     required String categoryId,
     required String note,
@@ -699,6 +805,7 @@ class TimeTrackingController extends ChangeNotifier {
   @override
   void dispose() {
     _stopTicker();
+    _autoSyncTimer?.cancel();
     super.dispose();
   }
 }
