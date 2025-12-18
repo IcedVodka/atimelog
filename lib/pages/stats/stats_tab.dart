@@ -42,63 +42,78 @@ class _StatsTabState extends State<StatsTab>
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Icon(Icons.analytics_outlined, color: Colors.blue),
-                      SizedBox(width: 8),
-                      Text(
-                        '统计与历史',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(width: 8),
                   Expanded(
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          FilterChip(
-                            label: const Text('合并暂停片段'),
-                            selected: _mergePause,
-                            onSelected: (val) =>
-                                setState(() => _mergePause = val),
-                          ),
-                          const SizedBox(width: 8),
-                          FilterChip(
-                            label: const Text('合并群组'),
-                            selected: _groupMerge,
-                            onSelected: (val) =>
-                                setState(() => _groupMerge = val),
-                          ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceVariant.withOpacity(0.6),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const TabBar(
+                        tabs: [
+                          Tab(icon: Icon(Icons.timeline), text: '时间线'),
+                          Tab(icon: Icon(Icons.pie_chart), text: '饼图'),
                         ],
                       ),
                     ),
                   ),
-                ],
-              ),
-            ),
-            Container(
-              color: Theme.of(
-                context,
-              ).colorScheme.surfaceVariant.withOpacity(0.6),
-              child: const TabBar(
-                tabs: [
-                  Tab(icon: Icon(Icons.timeline), text: '时间线'),
-                  Tab(icon: Icon(Icons.pie_chart), text: '饼图'),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      _mergeToggle(
+                        label: '合并片段',
+                        value: _mergePause,
+                        onChanged: (val) => setState(() => _mergePause = val),
+                      ),
+                      const SizedBox(height: 6),
+                      _mergeToggle(
+                        label: '合并群组',
+                        value: _groupMerge,
+                        onChanged: (val) => setState(() => _groupMerge = val),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
             Expanded(
               child: TabBarView(children: [_buildTimeline(), _buildPie()]),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _mergeToggle({
+    required String label,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    final theme = Theme.of(context);
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: () => onChanged(!value),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              value ? Icons.check_circle : Icons.radio_button_unchecked,
+              size: 18,
+              color: value
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.outline,
+            ),
+            const SizedBox(width: 6),
+            Text(label),
           ],
         ),
       ),
@@ -114,31 +129,98 @@ class _StatsTabState extends State<StatsTab>
       );
     }
 
-    Widget buildModeChipsRow() {
-      return SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            modeChip('近24小时', TimelineRangeMode.last24h),
-            const SizedBox(width: 8),
-            modeChip('指定日期', TimelineRangeMode.day),
-            const SizedBox(width: 8),
-            modeChip('自定义范围', TimelineRangeMode.custom),
-          ],
-        ),
-      );
-    }
-
-    final searchField = ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 180, maxWidth: 320),
-      child: TextField(
-        decoration: const InputDecoration(
-          labelText: '搜索记录内容 / 分类',
-          prefixIcon: Icon(Icons.search),
-        ),
-        onChanged: (value) => setState(() => _timelineKeyword = value),
+    final modeChips = SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          modeChip('近24小时', TimelineRangeMode.last24h),
+          const SizedBox(width: 8),
+          modeChip('指定日期', TimelineRangeMode.day),
+          const SizedBox(width: 8),
+          modeChip('自定义范围', TimelineRangeMode.custom),
+        ],
       ),
     );
+
+    final searchField = TextField(
+      decoration: const InputDecoration(
+        labelText: '搜索记录内容 / 分类',
+        prefixIcon: Icon(Icons.search),
+      ),
+      onChanged: (value) => setState(() => _timelineKeyword = value),
+    );
+
+    Widget rangeDisplay() {
+      if (_timelineMode == TimelineRangeMode.day) {
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              onPressed: () => setState(
+                () => _timelineDate = _timelineDate.subtract(
+                  const Duration(days: 1),
+                ),
+              ),
+              icon: const Icon(Icons.chevron_left),
+            ),
+            TextButton(
+              onPressed: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: _timelineDate,
+                  firstDate: DateTime.now().subtract(
+                    const Duration(days: 365),
+                  ),
+                  lastDate: DateTime.now(),
+                );
+                if (picked != null) {
+                  setState(() => _timelineDate = picked);
+                }
+              },
+              child: Text(DateFormat('yyyy-MM-dd').format(_timelineDate)),
+            ),
+            IconButton(
+              onPressed: _timelineDate.isBefore(DateTime.now())
+                  ? () => setState(
+                        () => _timelineDate = _timelineDate.add(
+                          const Duration(days: 1),
+                        ),
+                      )
+                  : null,
+              icon: const Icon(Icons.chevron_right),
+            ),
+          ],
+        );
+      }
+      if (_timelineMode == TimelineRangeMode.custom) {
+        final custom = _currentCustomRange();
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            _rangeValue(
+              custom.start,
+              onTap: () => _pickCustomStart(custom),
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 2),
+              child: Icon(Icons.remove, size: 14),
+            ),
+            _rangeValue(
+              custom.end,
+              onTap: () => _pickCustomEnd(custom),
+            ),
+          ],
+        );
+      }
+      return Text(
+        '近24小时',
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+      );
+    }
 
     return FutureBuilder<List<_TimelineGroupDisplay>>(
       future: _loadTimelineGroups(),
@@ -150,222 +232,33 @@ class _StatsTabState extends State<StatsTab>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  buildModeChipsRow(),
+                  modeChips,
                   const SizedBox(height: 10),
-                  searchField,
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: searchField),
+                      const SizedBox(width: 12),
+                      Flexible(
+                        child: Align(
+                          alignment: Alignment.topRight,
+                          child: rangeDisplay(),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
           ),
-        ];
-
-        if (_timelineMode == TimelineRangeMode.day) {
-          slivers.add(
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  children: [
-                    IconButton(
-                      onPressed: () => setState(
-                        () => _timelineDate = _timelineDate.subtract(
-                          const Duration(days: 1),
-                        ),
-                      ),
-                      icon: const Icon(Icons.chevron_left),
-                    ),
-                    TextButton(
-                      onPressed: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: _timelineDate,
-                          firstDate: DateTime.now().subtract(
-                            const Duration(days: 365),
-                          ),
-                          lastDate: DateTime.now(),
-                        );
-                        if (picked != null) {
-                          setState(() => _timelineDate = picked);
-                        }
-                      },
-                      child: Text(DateFormat('yyyy-MM-dd').format(_timelineDate)),
-                    ),
-                    IconButton(
-                      onPressed: _timelineDate.isBefore(DateTime.now())
-                          ? () => setState(
-                                () => _timelineDate = _timelineDate.add(
-                                  const Duration(days: 1),
-                                ),
-                              )
-                          : null,
-                      icon: const Icon(Icons.chevron_right),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        }
-
-        if (_timelineMode == TimelineRangeMode.custom) {
-          slivers.add(
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Builder(
-                  builder: (context) {
-                    final now = DateTime.now();
-                    final custom = _timelineCustomRange ??
-                        DateTimeRange(
-                          start: now.subtract(const Duration(days: 1)),
-                          end: now,
-                        );
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${DateFormat('MM-dd HH:mm').format(custom.start)} - ${DateFormat('MM-dd HH:mm').format(custom.end)}',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            TextButton.icon(
-                              onPressed: () async {
-                                final picked = await showDateRangePicker(
-                                  context: context,
-                                  initialDateRange: custom,
-                                  firstDate: now.subtract(
-                                    const Duration(days: 365),
-                                  ),
-                                  lastDate: now,
-                                );
-                                if (picked != null) {
-                                  setState(() {
-                                    _timelineCustomRange = DateTimeRange(
-                                      start: DateTime(
-                                        picked.start.year,
-                                        picked.start.month,
-                                        picked.start.day,
-                                      ),
-                                      end: DateTime(
-                                        picked.end.year,
-                                        picked.end.month,
-                                        picked.end.day,
-                                        23,
-                                        59,
-                                        59,
-                                      ),
-                                    );
-                                  });
-                                }
-                              },
-                              icon: const Icon(Icons.calendar_month_outlined),
-                              label: const Text('日期范围'),
-                            ),
-                            TextButton.icon(
-                              onPressed: () async {
-                                final pickedDate = await showDatePicker(
-                                  context: context,
-                                  initialDate: custom.start,
-                                  firstDate: now.subtract(
-                                    const Duration(days: 365),
-                                  ),
-                                  lastDate: now,
-                                );
-                                if (pickedDate == null) return;
-                                final pickedTime = await showTimePicker(
-                                  context: context,
-                                  initialTime:
-                                      TimeOfDay.fromDateTime(custom.start),
-                                );
-                                final time = pickedTime ??
-                                    TimeOfDay.fromDateTime(custom.start);
-                                final updated = DateTime(
-                                  pickedDate.year,
-                                  pickedDate.month,
-                                  pickedDate.day,
-                                  time.hour,
-                                  time.minute,
-                                );
-                                if (updated.isAfter(custom.end)) {
-                                  _showSnack('开始时间需早于结束时间');
-                                  return;
-                                }
-                                setState(() {
-                                  _timelineCustomRange = DateTimeRange(
-                                    start: updated,
-                                    end: custom.end,
-                                  );
-                                });
-                              },
-                              icon: const Icon(Icons.play_circle_outline),
-                              label: const Text('起始时间'),
-                            ),
-                            TextButton.icon(
-                              onPressed: () async {
-                                final pickedDate = await showDatePicker(
-                                  context: context,
-                                  initialDate: custom.end,
-                                  firstDate: now.subtract(
-                                    const Duration(days: 365),
-                                  ),
-                                  lastDate: now,
-                                );
-                                if (pickedDate == null) return;
-                                final pickedTime = await showTimePicker(
-                                  context: context,
-                                  initialTime:
-                                      TimeOfDay.fromDateTime(custom.end),
-                                );
-                                final time = pickedTime ??
-                                    TimeOfDay.fromDateTime(custom.end);
-                                final updated = DateTime(
-                                  pickedDate.year,
-                                  pickedDate.month,
-                                  pickedDate.day,
-                                  time.hour,
-                                  time.minute,
-                                );
-                                if (!updated.isAfter(custom.start)) {
-                                  _showSnack('结束时间需要晚于开始时间');
-                                  return;
-                                }
-                                setState(() {
-                                  _timelineCustomRange = DateTimeRange(
-                                    start: custom.start,
-                                    end: updated,
-                                  );
-                                });
-                              },
-                              icon: const Icon(Icons.stop_circle_outlined),
-                              label: const Text('结束时间'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            ),
-          );
-        }
-
-        slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 8)));
-        slivers.add(
+          const SliverToBoxAdapter(child: SizedBox(height: 8)),
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
             sliver: SliverToBoxAdapter(
               child: _buildTimelineContent(snapshot),
             ),
           ),
-        );
+        ];
 
         return CustomScrollView(
           primary: false,
@@ -374,6 +267,95 @@ class _StatsTabState extends State<StatsTab>
         );
       },
     );
+  }
+
+  DateTimeRange _currentCustomRange() {
+    final now = DateTime.now();
+    return _timelineCustomRange ??
+        DateTimeRange(
+          start: now.subtract(const Duration(days: 1)),
+          end: now,
+        );
+  }
+
+  Widget _rangeValue(DateTime time, {required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Text(
+          DateFormat('MM-dd HH:mm').format(time),
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickCustomStart(DateTimeRange current) async {
+    final now = DateTime.now();
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: current.start,
+      firstDate: now.subtract(const Duration(days: 365)),
+      lastDate: now,
+    );
+    if (pickedDate == null) return;
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(current.start),
+    );
+    final time = pickedTime ?? TimeOfDay.fromDateTime(current.start);
+    final updated = DateTime(
+      pickedDate.year,
+      pickedDate.month,
+      pickedDate.day,
+      time.hour,
+      time.minute,
+    );
+    if (!updated.isBefore(current.end)) {
+      _showSnack('开始时间需早于结束时间');
+      return;
+    }
+    setState(() {
+      _timelineCustomRange = DateTimeRange(
+        start: updated,
+        end: current.end,
+      );
+    });
+  }
+
+  Future<void> _pickCustomEnd(DateTimeRange current) async {
+    final now = DateTime.now();
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: current.end,
+      firstDate: now.subtract(const Duration(days: 365)),
+      lastDate: now,
+    );
+    if (pickedDate == null) return;
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(current.end),
+    );
+    final time = pickedTime ?? TimeOfDay.fromDateTime(current.end);
+    final updated = DateTime(
+      pickedDate.year,
+      pickedDate.month,
+      pickedDate.day,
+      time.hour,
+      time.minute,
+    );
+    if (!updated.isAfter(current.start)) {
+      _showSnack('结束时间需要晚于开始时间');
+      return;
+    }
+    setState(() {
+      _timelineCustomRange = DateTimeRange(
+        start: current.start,
+        end: updated,
+      );
+    });
   }
 
   Widget _buildTimelineContent(
@@ -434,23 +416,7 @@ class _StatsTabState extends State<StatsTab>
     final displayName = _groupMerge
         ? group.groupLabel
         : _categoryDisplayName(group.categoryId);
-    Widget infoPill(String text, IconData icon) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.06),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 16, color: color),
-            const SizedBox(width: 4),
-            Text(text, style: const TextStyle(fontWeight: FontWeight.w600)),
-          ],
-        ),
-      );
-    }
+    final totalText = formatDurationText(group.totalDuration);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -471,34 +437,24 @@ class _StatsTabState extends State<StatsTab>
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Column(
+                  child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        displayName,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 16,
+                      Expanded(
+                        child: Text(
+                          displayName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 6,
-                        children: [
-                          infoPill(
-                            '群组 ${group.groupLabel}',
-                            Icons.folder_special_outlined,
-                          ),
-                          infoPill(
-                            '总计 ${formatDurationText(group.totalDuration)}',
-                            Icons.av_timer,
-                          ),
-                          infoPill(
-                            '片段 ${group.segments.length}',
-                            Icons.view_agenda_outlined,
-                          ),
-                        ],
+                      Text(
+                        '总计 $totalText',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: color,
+                        ),
                       ),
                     ],
                   ),
@@ -507,69 +463,69 @@ class _StatsTabState extends State<StatsTab>
             ),
             const SizedBox(height: 8),
             ...group.segments.map(
-              (segment) => Container(
-                margin: const EdgeInsets.only(top: 8),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: color.withOpacity(0.1)),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+              (segment) {
+                final note = segment.note.trim();
+                return Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${formatClock(segment.startTime)} - ${formatClock(segment.endTime)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            if (note.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  note,
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(
-                            '${formatClock(segment.startTime)} - ${formatClock(segment.endTime)}',
-                            style: const TextStyle(fontWeight: FontWeight.w700),
+                            formatDurationText(segment.duration),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: color,
+                            ),
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            segment.note.isEmpty
-                                ? '记录内容：无'
-                                : '记录内容：${segment.note}',
-                            style: Theme.of(context).textTheme.bodyMedium,
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: '编辑',
+                                icon: const Icon(Icons.edit),
+                                onPressed: () => _editRecord(segment),
+                              ),
+                              IconButton(
+                                tooltip: '删除',
+                                icon: const Icon(
+                                  Icons.delete,
+                                  color: Colors.redAccent,
+                                ),
+                                onPressed: () => _deleteRecord(segment),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          formatDurationText(segment.duration),
-                          style: TextStyle(
-                            fontWeight: FontWeight.w800,
-                            color: color,
-                          ),
-                        ),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              tooltip: '编辑',
-                              icon: const Icon(Icons.edit),
-                              onPressed: () => _editRecord(segment),
-                            ),
-                            IconButton(
-                              tooltip: '删除',
-                              icon: const Icon(
-                                Icons.delete,
-                                color: Colors.redAccent,
-                              ),
-                              onPressed: () => _deleteRecord(segment),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
+                    ],
+                  ),
+                );
+              },
             ),
           ],
         ),

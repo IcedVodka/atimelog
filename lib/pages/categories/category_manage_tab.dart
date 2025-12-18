@@ -194,12 +194,18 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      '分类管理',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    Row(
+                      children: const [
+                        Icon(Icons.category_outlined, size: 20),
+                        SizedBox(width: 6),
+                        Text(
+                          '分类管理',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                     FilledButton.icon(
                       onPressed: () => _showCategoryEditor(),
@@ -207,16 +213,6 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                       label: const Text('新增'),
                     ),
                   ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '长按卡片即可拖动排序 · 布局与分类网格一致，依然支持新增和编辑',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
                 ),
               ),
               Expanded(

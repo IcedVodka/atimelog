@@ -23,15 +23,22 @@ class ActivityTab extends StatefulWidget {
   State<ActivityTab> createState() => ActivityTabState();
 }
 
-class ActivityTabState extends State<ActivityTab> {
+class ActivityTabState extends State<ActivityTab>
+    with SingleTickerProviderStateMixin {
   String? _selectedCategoryId;
   bool _savingCurrentNote = false;
   String? _lastCurrentTempId;
   Timer? _noteSaveDebounce;
+  late final AnimationController _syncSpinController;
+  bool _syncIconSpinning = false;
 
   @override
   void initState() {
     super.initState();
+    _syncSpinController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
     final cats = widget.controller.categories.where((e) => e.enabled).toList();
     if (cats.isNotEmpty) {
       _selectedCategoryId = cats.first.id;
@@ -40,6 +47,7 @@ class ActivityTabState extends State<ActivityTab> {
 
   @override
   void dispose() {
+    _syncSpinController.dispose();
     _noteSaveDebounce?.cancel();
     super.dispose();
   }
@@ -548,6 +556,20 @@ class ActivityTabState extends State<ActivityTab> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  void _updateSyncAnimation(bool syncing) {
+    if (syncing && !_syncIconSpinning) {
+      _syncIconSpinning = true;
+      _syncSpinController
+        ..reset()
+        ..repeat();
+    } else if (!syncing && _syncIconSpinning) {
+      _syncIconSpinning = false;
+      _syncSpinController
+        ..stop()
+        ..reset();
+    }
+  }
+
   bool _isDesktopPlatform() {
     final platform = Theme.of(context).platform;
     return platform == TargetPlatform.macOS ||
@@ -583,153 +605,108 @@ class ActivityTabState extends State<ActivityTab> {
         ' · ${status.lastDuration?.inSeconds ?? 0}s';
   }
 
-  Widget _buildSyncInfo() {
+  Future<void> _showSyncDialog() async {
     final status = widget.controller.syncStatus;
     final config = widget.controller.syncConfig;
     final theme = Theme.of(context);
     final isReady = config.isConfigured;
-    String title;
-    Color titleColor;
-    if (!isReady) {
-      title = '未配置 WebDAV';
-      titleColor = theme.colorScheme.error;
-    } else if (status.syncing) {
-      title = '同步中...';
-      titleColor = theme.colorScheme.primary;
-    } else if (status.lastSyncSucceeded == false) {
-      title = '上次同步失败';
-      titleColor = theme.colorScheme.error;
-    } else if (status.lastSyncSucceeded == true) {
-      title = '上次同步成功';
-      titleColor = Colors.green.shade600;
-    } else {
-      title = '尚未同步';
-      titleColor = theme.colorScheme.onSurfaceVariant;
-    }
+    final detail = _syncDetailText(status, isReady);
+    final counterText = _syncCounterText(status);
     final lastTime = status.lastSyncTime != null
         ? DateFormat('MM-dd HH:mm:ss').format(status.lastSyncTime!)
         : '暂无';
-    final detail = _syncDetailText(status, isReady);
-    final counterText = _syncCounterText(status);
-    final actionButton = SizedBox(
-      height: 44,
-      child: FilledButton.icon(
-        onPressed: status.syncing || !isReady
-            ? null
-            : () => widget.controller.syncNow(
-                  manual: true,
-                  reason: '手动同步',
-                ),
-        icon: status.syncing
-            ? const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.sync),
-        label: Text(status.syncing ? '同步中' : '手动同步'),
-      ),
-    );
-    final iconBox = Container(
-      decoration: BoxDecoration(
-        color: titleColor.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      padding: const EdgeInsets.all(10),
-      child: Icon(
-        Icons.cloud_sync,
-        color: titleColor,
-      ),
-    );
-    final infoColumn = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
+    Color titleColor;
+    String statusLabel;
+    if (!isReady) {
+      titleColor = theme.colorScheme.error;
+      statusLabel = '未配置 WebDAV';
+    } else if (status.syncing) {
+      titleColor = theme.colorScheme.primary;
+      statusLabel = '同步中...';
+    } else if (status.lastSyncSucceeded == true) {
+      titleColor = Colors.green.shade600;
+      statusLabel = '上次同步成功';
+    } else if (status.lastSyncSucceeded == false) {
+      titleColor = theme.colorScheme.error;
+      statusLabel = '上次同步失败';
+    } else {
+      titleColor = theme.colorScheme.onSurfaceVariant;
+      statusLabel = '尚未同步';
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.sync, color: titleColor),
+            const SizedBox(width: 8),
+            const Text('同步'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              title,
+              statusLabel,
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 color: titleColor,
               ),
             ),
-            Text(
-              lastTime,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+            const SizedBox(height: 8),
+            Text('最近：$lastTime'),
+            const SizedBox(height: 6),
+            Text(detail),
+            if (counterText.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(counterText),
+            ],
           ],
         ),
-        const SizedBox(height: 4),
-        Text(
-          detail,
-          style: theme.textTheme.bodyMedium,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        if (counterText.isNotEmpty) ...[
-          const SizedBox(height: 2),
-          Text(
-            counterText,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+          FilledButton.icon(
+            onPressed: status.syncing || !isReady
+                ? null
+                : () async {
+                    Navigator.pop(context);
+                    await widget.controller.syncNow(
+                      manual: true,
+                      reason: '手动同步',
+                    );
+                  },
+            icon: status.syncing
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.sync),
+            label: Text(status.syncing ? '同步中' : '手动同步'),
           ),
         ],
-      ],
+      ),
     );
+  }
 
-    return Card(
-      color: theme.colorScheme.surfaceVariant.withOpacity(0.6),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final isCompact = constraints.maxWidth < 380;
-            final actionWrapper = ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 128),
-              child: actionButton,
-            );
-
-            if (isCompact) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      iconBox,
-                      const SizedBox(width: 12),
-                      Expanded(child: infoColumn),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: actionWrapper,
-                  ),
-                ],
-              );
-            }
-
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                iconBox,
-                const SizedBox(width: 12),
-                Expanded(child: infoColumn),
-                const SizedBox(width: 8),
-                actionWrapper,
-              ],
-            );
-          },
-        ),
+  Widget _buildSyncButton(SyncStatus status) {
+    final theme = Theme.of(context);
+    final isReady = widget.controller.syncConfig.isConfigured;
+    final baseColor =
+        isReady ? theme.colorScheme.primary : theme.colorScheme.error;
+    return FloatingActionButton.small(
+      heroTag: 'sync-fab',
+      backgroundColor: theme.colorScheme.surface.withOpacity(0.92),
+      foregroundColor: baseColor,
+      onPressed: () => _showSyncDialog(),
+      child: RotationTransition(
+        turns: Tween(begin: 0.0, end: 1.0).animate(_syncSpinController),
+        child: const Icon(Icons.sync),
       ),
     );
   }
@@ -747,21 +724,28 @@ class ActivityTabState extends State<ActivityTab> {
         }
         final activity = widget.controller.currentActivity;
         final recents = widget.controller.recentContexts;
+        final syncStatus = widget.controller.syncStatus;
+        _updateSyncAnimation(syncStatus.syncing);
 
         return SafeArea(
-          child: ListView(
-            primary: false,
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+          child: Stack(
             children: [
-              _buildSyncInfo(),
-              const SizedBox(height: 12),
-              _buildActiveCard(activity),
-              const SizedBox(height: 12),
-              _buildQuickStart(categories),
-              const SizedBox(height: 12),
-              _buildRecents(recents),
-              const SizedBox(height: 12),
-              _buildCategoryGrid(categories),
+              ListView(
+                primary: false,
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+                children: [
+                  _buildActiveCard(activity),
+                  const SizedBox(height: 12),
+                  _buildRecents(recents),
+                  const SizedBox(height: 12),
+                  _buildCategoryGrid(categories),
+                ],
+              ),
+              Positioned(
+                left: 16,
+                bottom: 16,
+                child: _buildSyncButton(syncStatus),
+              ),
             ],
           ),
         );
@@ -832,11 +816,6 @@ class ActivityTabState extends State<ActivityTab> {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        current.note,
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
                     ],
                   ),
                 ),
@@ -862,10 +841,7 @@ class ActivityTabState extends State<ActivityTab> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         ),
                       )
-                    : const Padding(
-                        padding: EdgeInsets.all(10),
-                        child: Icon(Icons.check_circle, size: 18),
-                      ),
+                    : null,
               ),
             ),
             const SizedBox(height: 16),
@@ -897,7 +873,7 @@ class ActivityTabState extends State<ActivityTab> {
                     label: const FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Text(
-                        '暂停归档',
+                        '暂停',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -925,7 +901,7 @@ class ActivityTabState extends State<ActivityTab> {
                     label: const FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Text(
-                        '停止归档',
+                        '停止',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -933,79 +909,6 @@ class ActivityTabState extends State<ActivityTab> {
                   ),
                 ),
               ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildQuickStart(List<CategoryModel> categories) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('快速开始', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 12),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final isNarrow = constraints.maxWidth < 360;
-                final dropdownField = DropdownButtonFormField<String>(
-                  value: _selectedCategoryId,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    labelText: '分类',
-                  ),
-                  items: categories
-                      .map(
-                        (cat) => DropdownMenuItem(
-                          value: cat.id,
-                          child: Row(
-                            children: [
-                              Icon(cat.iconData, color: cat.color),
-                              const SizedBox(width: 8),
-                              Text(cat.name),
-                            ],
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) =>
-                      setState(() => _selectedCategoryId = value),
-                );
-                final startButton = SizedBox(
-                  height: 48,
-                  child: FilledButton.icon(
-                    onPressed: _startFromSelected,
-                    icon: const Icon(Icons.play_arrow_rounded),
-                    label: const Text('开始'),
-                  ),
-                );
-
-                if (isNarrow) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      dropdownField,
-                      const SizedBox(height: 12),
-                      startButton,
-                    ],
-                  );
-                }
-
-                return Row(
-                  children: [
-                    Expanded(child: dropdownField),
-                    const SizedBox(width: 12),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(minWidth: 96),
-                      child: startButton,
-                    ),
-                  ],
-                );
-              },
             ),
           ],
         ),
@@ -1033,60 +936,72 @@ class ActivityTabState extends State<ActivityTab> {
             Duration(seconds: item.accumulatedSeconds),
           );
           return Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    backgroundColor:
-                        category?.color.withOpacity(0.1) ??
-                        Colors.blue.withOpacity(0.1),
-                    child: Icon(
-                      category?.iconData ?? Icons.history,
-                      color: category?.color ?? Colors.blue,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => _editRecentContext(item),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor:
+                          category?.color.withOpacity(0.1) ??
+                          Colors.blue.withOpacity(0.1),
+                      child: Icon(
+                        category?.iconData ?? Icons.history,
+                        color: category?.color ?? Colors.blue,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            category?.name ?? item.categoryId,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '$durationText · ${formatLastActiveText(item.lastActiveTime)}$statusLabel',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          item.note,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        IconButton(
+                          onPressed: isDeleted || !isEnabled
+                              ? null
+                              : () => _handleResume(item),
+                          icon: const Icon(Icons.play_arrow_rounded),
+                          tooltip: isDeleted
+                              ? '分类已删除，无法继续'
+                              : (!isEnabled ? '分类已停用，无法继续' : '继续'),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${category?.name ?? item.categoryId}$statusLabel · 已记录 $durationText · ${formatLastActiveText(item.lastActiveTime)}',
-                          style: Theme.of(context).textTheme.bodySmall,
+                        IconButton(
+                          onPressed: () async =>
+                              widget.controller.removeRecentContext(
+                            item.groupId,
+                          ),
+                          icon: const Icon(
+                            Icons.archive_outlined,
+                            color: Colors.redAccent,
+                          ),
+                          tooltip: '归档保存',
                         ),
                       ],
                     ),
-                  ),
-                  IconButton(
-                    onPressed: isDeleted || !isEnabled
-                        ? null
-                        : () => _handleResume(item),
-                    icon: const Icon(Icons.play_circle, color: Colors.green),
-                    tooltip: isDeleted
-                        ? '分类已删除，无法继续'
-                        : (!isEnabled ? '分类已停用，无法继续' : '继续'),
-                  ),
-                  IconButton(
-                    onPressed: () => _editRecentContext(item),
-                    icon: const Icon(Icons.edit_note_outlined),
-                    tooltip: '编辑',
-                  ),
-                  IconButton(
-                    onPressed: () async =>
-                        widget.controller.removeRecentContext(item.groupId),
-                    icon: const Icon(
-                      Icons.archive_outlined,
-                      color: Colors.redAccent,
-                    ),
-                    tooltip: '归档保存',
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           );
