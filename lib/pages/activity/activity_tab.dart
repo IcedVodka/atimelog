@@ -548,6 +548,13 @@ class ActivityTabState extends State<ActivityTab> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  bool _isDesktopPlatform() {
+    final platform = Theme.of(context).platform;
+    return platform == TargetPlatform.macOS ||
+        platform == TargetPlatform.windows ||
+        platform == TargetPlatform.linux;
+  }
+
   String _syncDetailText(SyncStatus status, bool isReady) {
     final progress = status.progress;
     if (status.syncing && progress != null) {
@@ -604,87 +611,124 @@ class ActivityTabState extends State<ActivityTab> {
         : '暂无';
     final detail = _syncDetailText(status, isReady);
     final counterText = _syncCounterText(status);
+    final actionButton = SizedBox(
+      height: 44,
+      child: FilledButton.icon(
+        onPressed: status.syncing || !isReady
+            ? null
+            : () => widget.controller.syncNow(
+                  manual: true,
+                  reason: '手动同步',
+                ),
+        icon: status.syncing
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.sync),
+        label: Text(status.syncing ? '同步中' : '手动同步'),
+      ),
+    );
+    final iconBox = Container(
+      decoration: BoxDecoration(
+        color: titleColor.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      padding: const EdgeInsets.all(10),
+      child: Icon(
+        Icons.cloud_sync,
+        color: titleColor,
+      ),
+    );
+    final infoColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: titleColor,
+              ),
+            ),
+            Text(
+              lastTime,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          detail,
+          style: theme.textTheme.bodyMedium,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        if (counterText.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(
+            counterText,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ],
+    );
 
     return Card(
       color: theme.colorScheme.surfaceVariant.withOpacity(0.6),
       child: Padding(
         padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            Container(
-              decoration: BoxDecoration(
-                color: titleColor.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              padding: const EdgeInsets.all(10),
-              child: Icon(
-                Icons.cloud_sync,
-                color: titleColor,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isCompact = constraints.maxWidth < 380;
+            final actionWrapper = ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 128),
+              child: actionButton,
+            );
+
+            if (isCompact) {
+              return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: titleColor,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        lastTime,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
+                      iconBox,
+                      const SizedBox(width: 12),
+                      Expanded(child: infoColumn),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    detail,
-                    style: theme.textTheme.bodyMedium,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: actionWrapper,
                   ),
-                  if (counterText.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      counterText,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
                 ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            SizedBox(
-              height: 44,
-              child: FilledButton.icon(
-                onPressed: status.syncing || !isReady
-                    ? null
-                    : () => widget.controller.syncNow(
-                          manual: true,
-                          reason: '手动同步',
-                        ),
-                icon: status.syncing
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.sync),
-                label: Text(status.syncing ? '同步中' : '手动同步'),
-              ),
-            ),
-          ],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                iconBox,
+                const SizedBox(width: 12),
+                Expanded(child: infoColumn),
+                const SizedBox(width: 8),
+                actionWrapper,
+              ],
+            );
+          },
         ),
       ),
     );
@@ -837,21 +881,55 @@ class ActivityTabState extends State<ActivityTab> {
               children: [
                 Expanded(
                   child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(46),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 12,
+                      ),
+                      textStyle: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     onPressed: _handlePause,
                     icon: const Icon(Icons.pause),
-                    label: const Text('暂停 (归档)'),
+                    label: const FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '暂停归档',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: FilledButton.icon(
                     style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(46),
                       backgroundColor: Colors.red.shade600,
                       foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 12,
+                      ),
+                      textStyle: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     onPressed: _handleStop,
                     icon: const Icon(Icons.stop),
-                    label: const Text('停止并归档保存'),
+                    label: const FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '停止归档',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -871,40 +949,63 @@ class ActivityTabState extends State<ActivityTab> {
           children: [
             Text('快速开始', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    value: _selectedCategoryId,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      labelText: '分类',
-                    ),
-                    items: categories
-                        .map(
-                          (cat) => DropdownMenuItem(
-                            value: cat.id,
-                            child: Row(
-                              children: [
-                                Icon(cat.iconData, color: cat.color),
-                                const SizedBox(width: 8),
-                                Text(cat.name),
-                              ],
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) =>
-                        setState(() => _selectedCategoryId = value),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isNarrow = constraints.maxWidth < 360;
+                final dropdownField = DropdownButtonFormField<String>(
+                  value: _selectedCategoryId,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    labelText: '分类',
                   ),
-                ),
-                const SizedBox(width: 12),
-                FilledButton.icon(
-                  onPressed: _startFromSelected,
-                  icon: const Icon(Icons.play_arrow_rounded),
-                  label: const Text('开始'),
-                ),
-              ],
+                  items: categories
+                      .map(
+                        (cat) => DropdownMenuItem(
+                          value: cat.id,
+                          child: Row(
+                            children: [
+                              Icon(cat.iconData, color: cat.color),
+                              const SizedBox(width: 8),
+                              Text(cat.name),
+                            ],
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) =>
+                      setState(() => _selectedCategoryId = value),
+                );
+                final startButton = SizedBox(
+                  height: 48,
+                  child: FilledButton.icon(
+                    onPressed: _startFromSelected,
+                    icon: const Icon(Icons.play_arrow_rounded),
+                    label: const Text('开始'),
+                  ),
+                );
+
+                if (isNarrow) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      dropdownField,
+                      const SizedBox(height: 12),
+                      startButton,
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: [
+                    Expanded(child: dropdownField),
+                    const SizedBox(width: 12),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(minWidth: 96),
+                      child: startButton,
+                    ),
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -995,6 +1096,7 @@ class ActivityTabState extends State<ActivityTab> {
   }
 
   Widget _buildCategoryGrid(List<CategoryModel> categories) {
+    final isDesktop = _isDesktopPlatform();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1003,16 +1105,24 @@ class ActivityTabState extends State<ActivityTab> {
         LayoutBuilder(
           builder: (context, constraints) {
             final width = constraints.maxWidth;
-            final crossAxisCount = max(5, min(8, (width / 90).floor()));
+            final crossAxisCount = max(
+              3,
+              min(
+                isDesktop ? 7 : 6,
+                (width / (isDesktop ? 130 : 120)).floor(),
+              ),
+            );
+            final spacing = isDesktop ? 8.0 : 10.0;
+            final aspectRatio = isDesktop ? 1.05 : 0.78;
             return GridView.builder(
               primary: false,
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: crossAxisCount,
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
-                childAspectRatio: 0.78,
+                mainAxisSpacing: spacing,
+                crossAxisSpacing: spacing,
+                childAspectRatio: aspectRatio,
               ),
               itemCount: categories.length,
               itemBuilder: (context, index) {
@@ -1047,9 +1157,9 @@ class ActivityTabState extends State<ActivityTab> {
                         color: category.color.withOpacity(0.35),
                       ),
                     ),
-                    padding: const EdgeInsets.symmetric(
+                    padding: EdgeInsets.symmetric(
                       horizontal: 8,
-                      vertical: 10,
+                      vertical: isDesktop ? 8 : 10,
                     ),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,

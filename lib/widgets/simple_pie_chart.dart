@@ -106,10 +106,11 @@ class _PiePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final rect = Rect.fromLTWH(0, 0, size.width, size.height).deflate(20);
+    final baseStroke = size.width * 0.16;
+    final highlightStroke = size.width * 0.2;
+    final margin = math.max(12.0, highlightStroke / 2 + 6);
+    final rect = Rect.fromLTWH(0, 0, size.width, size.height).deflate(margin);
     final paint = Paint()..style = PaintingStyle.stroke;
-    final baseStroke = size.width * 0.18;
-    final highlightStroke = size.width * 0.22;
     final total = slices.fold<double>(0, (prev, e) => prev + e.value);
     double startRadian = -math.pi / 2;
     for (var i = 0; i < slices.length; i++) {

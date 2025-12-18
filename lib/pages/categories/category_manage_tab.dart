@@ -64,6 +64,13 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
         .toList(growable: false);
   }
 
+  bool _isDesktopPlatform(BuildContext context) {
+    final platform = Theme.of(context).platform;
+    return platform == TargetPlatform.macOS ||
+        platform == TargetPlatform.windows ||
+        platform == TargetPlatform.linux;
+  }
+
   MaterialColor _matchColorFamily(Color target) {
     MaterialColor? bestFamily;
     var bestScore = 1 << 30;
@@ -95,9 +102,9 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     return trimmed;
   }
 
-  int _resolveCrossAxisCount(double width) {
-    final count = (width / 100).floor();
-    return max(4, min(8, count));
+  int _resolveCrossAxisCount(double width, bool isDesktop) {
+    final count = (width / (isDesktop ? 150 : 140)).floor();
+    return max(2, min(isDesktop ? 6 : 5, count));
   }
 
   Future<void> _handleGridReorder({
@@ -176,6 +183,7 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     return AnimatedBuilder(
       animation: widget.controller,
       builder: (context, _) {
+        final isDesktop = _isDesktopPlatform(context);
         final categories = [...widget.controller.allCategories]
           ..sort((a, b) => a.order.compareTo(b.order));
         return SafeArea(
@@ -216,9 +224,10 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
                   builder: (context, constraints) {
                     final crossAxisCount = _resolveCrossAxisCount(
                       constraints.maxWidth,
+                      isDesktop,
                     );
                     const spacing = 10.0;
-                    const tileAspectRatio = 0.78;
+                    final tileAspectRatio = isDesktop ? 0.95 : 0.72;
                     final itemWidth =
                         (constraints.maxWidth - (crossAxisCount - 1) * spacing) /
                         crossAxisCount;
@@ -259,6 +268,8 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
     bool ghost = false,
   }) {
     final resolvedGroup = groupLabel.isEmpty ? cat.name : groupLabel;
+    final showGroupLabel =
+        resolvedGroup.isNotEmpty && resolvedGroup != cat.name;
     final theme = Theme.of(context);
     final isDeleted = cat.deleted;
     final isDisabled = !cat.enabled;
@@ -273,6 +284,7 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
         : theme.colorScheme.surfaceVariant.withOpacity(
             theme.brightness == Brightness.dark ? 0.36 : 0.52,
           );
+    final isDesktop = _isDesktopPlatform(context);
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
@@ -290,7 +302,10 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
               ]
             : [],
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      padding: EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: isDesktop ? 6 : 8,
+      ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -335,7 +350,7 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
             backgroundColor: displayColor.withOpacity(0.12),
             child: Icon(cat.iconData, color: displayColor),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           Text(
             cat.name,
             textAlign: TextAlign.center,
@@ -346,7 +361,7 @@ class _CategoryManageTabState extends State<CategoryManageTab> {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
-          if (resolvedGroup.isNotEmpty)
+          if (showGroupLabel)
             Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(
