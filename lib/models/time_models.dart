@@ -320,33 +320,58 @@ String prettyJson(Map<String, dynamic> payload) {
   return encoder.convert(payload);
 }
 
+enum OverlapFixMode {
+  none,
+  ask,
+  auto,
+}
+
+OverlapFixMode parseOverlapFixMode(String? raw) {
+  switch (raw) {
+    case 'none':
+      return OverlapFixMode.none;
+    case 'auto':
+      return OverlapFixMode.auto;
+    case 'ask':
+    default:
+      return OverlapFixMode.ask;
+  }
+}
+
 /// 应用基础设置。
 class AppSettings {
   const AppSettings({
     required this.darkMode,
     this.lastBackupPath,
     this.lastRestorePath,
+    this.overlapFixMode = OverlapFixMode.ask,
   });
 
   final bool darkMode;
   final String? lastBackupPath;
   final String? lastRestorePath;
+  final OverlapFixMode overlapFixMode;
 
   AppSettings copyWith({
     bool? darkMode,
     String? lastBackupPath,
     String? lastRestorePath,
+    OverlapFixMode? overlapFixMode,
   }) {
     return AppSettings(
       darkMode: darkMode ?? this.darkMode,
       lastBackupPath: lastBackupPath ?? this.lastBackupPath,
       lastRestorePath: lastRestorePath ?? this.lastRestorePath,
+      overlapFixMode: overlapFixMode ?? this.overlapFixMode,
     );
   }
 
   Map<String, dynamic> toJson() {
     // 仅保留主题配置，备份/恢复路径不再持久化。
-    return {'darkMode': darkMode};
+    return {
+      'darkMode': darkMode,
+      'overlapFixMode': overlapFixMode.name,
+    };
   }
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
@@ -354,11 +379,17 @@ class AppSettings {
       darkMode: json['darkMode'] as bool? ?? false,
       lastBackupPath: json['lastBackupPath'] as String?,
       lastRestorePath: json['lastRestorePath'] as String?,
+      overlapFixMode: parseOverlapFixMode(
+        json['overlapFixMode'] as String?,
+      ),
     );
   }
 
   static AppSettings defaults() {
-    return const AppSettings(darkMode: false);
+    return const AppSettings(
+      darkMode: false,
+      overlapFixMode: OverlapFixMode.ask,
+    );
   }
 }
 

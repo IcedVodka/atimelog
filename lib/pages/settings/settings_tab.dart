@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../../models/sync_models.dart';
+import '../../models/time_models.dart';
 import '../../services/time_tracking_controller.dart';
 
 class SettingsTab extends StatefulWidget {
@@ -122,6 +123,17 @@ class _SettingsTabState extends State<SettingsTab> {
       return '上次同步失败';
     }
     return '尚未同步';
+  }
+
+  String _overlapModeLabel(OverlapFixMode mode) {
+    switch (mode) {
+      case OverlapFixMode.none:
+        return '不校正';
+      case OverlapFixMode.ask:
+        return '校正提醒';
+      case OverlapFixMode.auto:
+        return '自动校正';
+    }
   }
 
   void _handleIntervalSubmit(String text) {
@@ -397,6 +409,55 @@ class _SettingsTabState extends State<SettingsTab> {
     );
   }
 
+  Widget _buildOverlapCard(ThemeData theme) {
+    final mode = widget.controller.overlapFixMode;
+    final items = OverlapFixMode.values;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.timelapse_outlined),
+                const SizedBox(width: 8),
+                Text(
+                  '交叉时间校正',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: items
+                  .map(
+                    (item) => ChoiceChip(
+                      label: Text(_overlapModeLabel(item)),
+                      selected: mode == item,
+                      onSelected: (_) =>
+                          widget.controller.updateOverlapFixMode(item),
+                    ),
+                  )
+                  .toList(),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '补录、编辑或调整时间时，如与其它活动重叠，可选择提醒或自动校正。',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -409,6 +470,8 @@ class _SettingsTabState extends State<SettingsTab> {
             padding: const EdgeInsets.all(16),
             children: [
               _buildSyncCard(theme),
+              const SizedBox(height: 12),
+              _buildOverlapCard(theme),
               const SizedBox(height: 12),
               SwitchListTile(
                 value: widget.controller.settings.darkMode,

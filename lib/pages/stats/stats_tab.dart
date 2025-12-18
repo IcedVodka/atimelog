@@ -7,6 +7,7 @@ import '../../core/utils/time_formatter.dart';
 import '../../models/time_models.dart';
 import '../../services/time_tracking_controller.dart';
 import '../../widgets/simple_pie_chart.dart';
+import '../../widgets/overlap_fix_dialog.dart';
 
 enum TimelineRangeMode { day, last24h, custom }
 
@@ -1053,20 +1054,21 @@ class _StatsTabState extends State<StatsTab>
     final resolvedNote = noteController.text.trim().isEmpty
         ? _resolveNote(record)
         : noteController.text.trim();
-    await widget.controller.updateRecordWithSync(
+    final saved = await widget.controller.updateRecordWithSync(
       record: record,
       newStart: startTime,
       newEnd: endTime,
       note: resolvedNote,
       syncGroupNotes: true,
+      onConflict: _handleOverlapConflict,
     );
+    if (!saved) {
+      return;
+    }
     final updatedRecords = await widget.controller.loadDayRecords(
       record.startTime,
     );
-    final hasOverlap = widget.controller.hasOverlap(
-      updatedRecords,
-      ignoringId: record.id,
-    );
+    final hasOverlap = widget.controller.hasOverlap(updatedRecords);
     if (hasOverlap) {
       _showSnack('已保存，但存在时间段重叠');
     }
@@ -1099,6 +1101,12 @@ class _StatsTabState extends State<StatsTab>
       await widget.controller.deleteRecord(record.startTime, record.id);
       setState(() {});
     }
+  }
+
+  Future<OverlapUserDecision> _handleOverlapConflict(
+    OverlapResolution resolution,
+  ) {
+    return showOverlapFixDialog(context, resolution);
   }
 
   void _showSnack(String text) {

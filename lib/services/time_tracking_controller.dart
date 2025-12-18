@@ -12,6 +12,79 @@ import '../models/time_models.dart';
 import 'sync_service.dart';
 import 'time_storage_service.dart';
 
+enum OverlapUserDecision { cancel, skipFix, applyFix }
+
+typedef OverlapConflictHandler = Future<OverlapUserDecision> Function(
+  OverlapResolution resolution,
+);
+
+class OverlapResolution {
+  OverlapResolution({
+    required this.day,
+    required this.anchor,
+    required this.anchorLabel,
+    required this.naiveRecords,
+    required this.fixedRecords,
+    required this.hasOverlap,
+    required this.changeSummaries,
+  });
+
+  final DateTime day;
+  final ActivityRecord anchor;
+  final String anchorLabel;
+  final List<ActivityRecord> naiveRecords;
+  final List<ActivityRecord> fixedRecords;
+  final bool hasOverlap;
+  final List<String> changeSummaries;
+
+  bool get hasChanges {
+    if (!hasOverlap) return false;
+    if (naiveRecords.length != fixedRecords.length) return true;
+    for (var i = 0; i < naiveRecords.length; i++) {
+      final a = naiveRecords[i];
+      final b = fixedRecords[i];
+      final sameTime =
+          a.startTime.isAtSameMomentAs(b.startTime) &&
+          a.endTime.isAtSameMomentAs(b.endTime);
+      final sameMeta =
+          a.id == b.id &&
+          a.groupId == b.groupId &&
+          a.categoryId == b.categoryId &&
+          a.isCrossDaySplit == b.isCrossDaySplit &&
+          a.durationSeconds == b.durationSeconds &&
+          a.note == b.note;
+      if (!sameTime || !sameMeta) {
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
+class _ResolvedRecords {
+  const _ResolvedRecords({
+    required this.records,
+    required this.summaries,
+  });
+
+  final List<ActivityRecord> records;
+  final List<String> summaries;
+}
+
+class _OverlapSaveResult {
+  const _OverlapSaveResult({
+    required this.saved,
+    required this.corrected,
+    required this.hadConflict,
+    required this.touchedGroupIds,
+  });
+
+  final bool saved;
+  final bool corrected;
+  final bool hadConflict;
+  final Set<String> touchedGroupIds;
+}
+
 class TimeTrackingController extends ChangeNotifier {
   TimeTrackingController(TimeStorageService storage)
     : _storage = storage,
@@ -41,6 +114,7 @@ class TimeTrackingController extends ChangeNotifier {
       List.unmodifiable(_categories.where((element) => !element.deleted));
   List<CategoryModel> get allCategories => List.unmodifiable(_categories);
   AppSettings get settings => _settings;
+  OverlapFixMode get overlapFixMode => _settings.overlapFixMode;
   SyncConfig get syncConfig => _syncConfig;
   SyncStatus get syncStatus => _syncStatus;
 
@@ -196,6 +270,7 @@ class TimeTrackingController extends ChangeNotifier {
 
   Future<ActivityRecord?> stopCurrentActivity({
     bool pushToRecent = true,
+    OverlapConflictHandler? onConflict,
   }) async {
     final current = _session.current;
     if (current == null) {
@@ -214,7 +289,14 @@ class TimeTrackingController extends ChangeNotifier {
       note: current.note,
     );
 
-    await _storage.appendActivity(record);
+    final saveResult = await _saveWithOverlapPolicy(
+      anchor: record,
+      includeAnchorInSave: true,
+      onConflict: onConflict,
+    );
+    if (!saveResult.saved) {
+      return null;
+    }
     final updatedContexts = _buildRecentContexts(record, push: pushToRecent);
     final updatedSession = _session.copyWith(
       clearCurrent: true,
@@ -223,6 +305,10 @@ class TimeTrackingController extends ChangeNotifier {
     );
     _session = updatedSession;
     await _storage.writeSession(updatedSession);
+    if ((saveResult.corrected || saveResult.hadConflict) &&
+        saveResult.touchedGroupIds.isNotEmpty) {
+      await _refreshRecentContextsForGroups(saveResult.touchedGroupIds);
+    }
     _stopTicker();
     notifyListeners();
     return record;
@@ -240,10 +326,42 @@ class TimeTrackingController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> updateCurrentStartTime(DateTime newStart) async {
+  Future<bool> updateCurrentStartTime(
+    DateTime newStart, {
+    OverlapConflictHandler? onConflict,
+  }) async {
     final current = _session.current;
     if (current == null) {
-      return;
+      return false;
+    }
+    if (newStart.isAfter(DateTime.now())) {
+      throw StateError('开始时间不能晚于当前时间');
+    }
+    if (_settings.overlapFixMode != OverlapFixMode.none) {
+      final anchorEnd = DateTime.now();
+      final anchorRecord = ActivityRecord(
+        id: current.tempId,
+        groupId: current.groupId,
+        categoryId: current.categoryId,
+        startTime: newStart,
+        endTime: anchorEnd,
+        durationSeconds: _ensurePositiveSeconds(
+          anchorEnd.difference(newStart).inSeconds,
+        ),
+        note: current.note,
+      );
+      final saveResult = await _saveWithOverlapPolicy(
+        anchor: anchorRecord,
+        includeAnchorInSave: false,
+        onConflict: onConflict,
+      );
+      if (!saveResult.saved) {
+        return false;
+      }
+      if ((saveResult.corrected || saveResult.hadConflict) &&
+          saveResult.touchedGroupIds.isNotEmpty) {
+        await _refreshRecentContextsForGroups(saveResult.touchedGroupIds);
+      }
     }
     _session = _session.copyWith(
       current: current.copyWith(startTime: newStart),
@@ -251,6 +369,7 @@ class TimeTrackingController extends ChangeNotifier {
     );
     await _storage.writeSession(_session);
     notifyListeners();
+    return true;
   }
 
   Future<void> updateCurrentNote(String note) async {
@@ -298,11 +417,12 @@ class TimeTrackingController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<ActivityRecord> manualAddRecord({
+  Future<ActivityRecord?> manualAddRecord({
     required String categoryId,
     required String note,
     required DateTime startTime,
     required DateTime endTime,
+    OverlapConflictHandler? onConflict,
   }) async {
     _requireActiveCategory(categoryId);
     if (!startTime.isBefore(endTime)) {
@@ -349,8 +469,19 @@ class TimeTrackingController extends ChangeNotifier {
       ).add(const Duration(days: 1));
     }
 
+    final touchedGroups = <String>{};
+    var needsRefresh = false;
     for (final segment in segments) {
-      await _storage.appendActivity(segment);
+      final saveResult = await _saveWithOverlapPolicy(
+        anchor: segment,
+        includeAnchorInSave: true,
+        onConflict: onConflict,
+      );
+      if (!saveResult.saved) {
+        return null;
+      }
+      touchedGroups.addAll(saveResult.touchedGroupIds);
+      needsRefresh = needsRefresh || saveResult.corrected || saveResult.hadConflict;
     }
     final mergedRecord = ActivityRecord(
       id: segments.first.id,
@@ -368,6 +499,9 @@ class TimeTrackingController extends ChangeNotifier {
       lastUpdated: DateTime.now().millisecondsSinceEpoch,
     );
     await _storage.writeSession(_session);
+    if (needsRefresh && touchedGroups.isNotEmpty) {
+      await _refreshRecentContextsForGroups(touchedGroups);
+    }
     notifyListeners();
     return mergedRecord;
   }
@@ -435,24 +569,39 @@ class TimeTrackingController extends ChangeNotifier {
     );
   }
 
-  Future<void> updateRecordWithSync({
+  Future<bool> updateRecordWithSync({
     required ActivityRecord record,
     required DateTime newStart,
     required DateTime newEnd,
     required String note,
     bool syncGroupNotes = false,
+    OverlapConflictHandler? onConflict,
   }) async {
     final resolved = _resolveNote(record.categoryId, note);
-    await _storage.updateRecord(
-      date: record.startTime,
-      recordId: record.id,
-      newStart: newStart,
-      newEnd: newEnd,
+    final updated = record.copyWith(
+      startTime: newStart,
+      endTime: newEnd,
+      durationSeconds: _ensurePositiveSeconds(
+        newEnd.difference(newStart).inSeconds,
+      ),
       note: resolved,
     );
-    if (syncGroupNotes) {
-      await _syncGroupNotes(record, resolved);
+    final saveResult = await _saveWithOverlapPolicy(
+      anchor: updated,
+      replaceId: record.id,
+      includeAnchorInSave: true,
+      onConflict: onConflict,
+    );
+    if (!saveResult.saved) {
+      return false;
     }
+    if (syncGroupNotes) {
+      await _syncGroupNotes(updated, resolved);
+    }
+    if (saveResult.touchedGroupIds.isNotEmpty) {
+      await _refreshRecentContextsForGroups(saveResult.touchedGroupIds);
+    }
+    return true;
   }
 
   Future<void> deleteRecord(DateTime date, String recordId) {
@@ -533,6 +682,12 @@ class TimeTrackingController extends ChangeNotifier {
       _startTicker();
       await _checkMidnightSplit();
     }
+    notifyListeners();
+  }
+
+  Future<void> updateOverlapFixMode(OverlapFixMode mode) async {
+    _settings = _settings.copyWith(overlapFixMode: mode);
+    await _storage.saveSettings(_settings);
     notifyListeners();
   }
 
@@ -823,6 +978,255 @@ class TimeTrackingController extends ChangeNotifier {
         note: resolved,
       );
     }
+  }
+
+  Future<OverlapResolution> _buildOverlapResolution({
+    required ActivityRecord anchor,
+    String? replaceId,
+  }) async {
+    final day = DateTime(anchor.startTime.year, anchor.startTime.month, anchor.startTime.day);
+    final existing = await _storage.loadDayRecords(day);
+    final base = replaceId == null
+        ? [...existing]
+        : existing.where((element) => element.id != replaceId).toList();
+    final naive = [...base, anchor]
+      ..sort((a, b) => a.startTime.compareTo(b.startTime));
+    final hasOverlap = base.any((element) => _isOverlap(anchor, element));
+    if (!hasOverlap) {
+      return OverlapResolution(
+        day: day,
+        anchor: anchor,
+        anchorLabel: _recordLabel(anchor),
+        naiveRecords: naive,
+        fixedRecords: naive,
+        hasOverlap: false,
+        changeSummaries: const [],
+      );
+    }
+    final resolved = _resolveAnchorConflicts(anchor, base);
+    return OverlapResolution(
+      day: day,
+      anchor: anchor,
+      anchorLabel: _recordLabel(anchor),
+      naiveRecords: naive,
+      fixedRecords: resolved.records,
+      hasOverlap: true,
+      changeSummaries: resolved.summaries,
+    );
+  }
+
+  _ResolvedRecords _resolveAnchorConflicts(
+    ActivityRecord anchor,
+    List<ActivityRecord> records,
+  ) {
+    final resolved = <ActivityRecord>[];
+    final summaries = <String>[];
+    for (final record in records) {
+      if (!_isOverlap(anchor, record)) {
+        resolved.add(record);
+        continue;
+      }
+      final segments = <ActivityRecord>[];
+      if (record.startTime.isBefore(anchor.startTime)) {
+        final end = anchor.startTime;
+        if (end.isAfter(record.startTime)) {
+          segments.add(
+            record.copyWith(
+              endTime: end,
+              durationSeconds: _ensurePositiveSeconds(
+                end.difference(record.startTime).inSeconds,
+              ),
+            ),
+          );
+        }
+      }
+      if (record.endTime.isAfter(anchor.endTime)) {
+        final start = anchor.endTime;
+        if (record.endTime.isAfter(start)) {
+          segments.add(
+            ActivityRecord(
+              id: _uuid.v4(),
+              groupId: record.groupId,
+              categoryId: record.categoryId,
+              startTime: start,
+              endTime: record.endTime,
+              durationSeconds: _ensurePositiveSeconds(
+                record.endTime.difference(start).inSeconds,
+              ),
+              note: record.note,
+              isCrossDaySplit: record.isCrossDaySplit,
+            ),
+          );
+        }
+      }
+      if (segments.isEmpty) {
+        summaries.add(
+          '${_recordLabel(record)} ${_formatRange(record.startTime, record.endTime)} '
+          '被 ${_formatRange(anchor.startTime, anchor.endTime)} 覆盖，已移除',
+        );
+        continue;
+      }
+      summaries.add(
+        '${_recordLabel(record)} ${_formatRange(record.startTime, record.endTime)} '
+        '→ ${segments.map((e) => _formatRange(e.startTime, e.endTime)).join(' / ')}',
+      );
+      resolved.addAll(segments);
+    }
+    resolved.add(anchor);
+    resolved.sort((a, b) => a.startTime.compareTo(b.startTime));
+    return _ResolvedRecords(records: resolved, summaries: summaries);
+  }
+
+  Future<_OverlapSaveResult> _saveWithOverlapPolicy({
+    required ActivityRecord anchor,
+    String? replaceId,
+    required bool includeAnchorInSave,
+    OverlapConflictHandler? onConflict,
+  }) async {
+    final resolution = await _buildOverlapResolution(
+      anchor: anchor,
+      replaceId: replaceId,
+    );
+    final touchedGroups = <String>{
+      ...resolution.naiveRecords.map((e) => e.groupId),
+      ...resolution.fixedRecords.map((e) => e.groupId),
+    };
+    final mode = _settings.overlapFixMode;
+    List<ActivityRecord> selected = resolution.naiveRecords;
+    bool corrected = false;
+
+    if (resolution.hasOverlap) {
+      switch (mode) {
+        case OverlapFixMode.none:
+          break;
+        case OverlapFixMode.auto:
+          selected = resolution.fixedRecords;
+          corrected = resolution.hasChanges;
+          break;
+        case OverlapFixMode.ask:
+          final handler = onConflict;
+          if (handler != null) {
+            final decision = await handler(resolution);
+            if (decision == OverlapUserDecision.cancel) {
+              return _OverlapSaveResult(
+                saved: false,
+                corrected: false,
+                hadConflict: true,
+                touchedGroupIds: touchedGroups,
+              );
+            }
+            if (decision == OverlapUserDecision.applyFix) {
+              selected = resolution.fixedRecords;
+              corrected = resolution.hasChanges;
+            } else {
+              selected = resolution.naiveRecords;
+            }
+          } else {
+            selected = resolution.fixedRecords;
+            corrected = resolution.hasChanges;
+          }
+          break;
+      }
+    }
+
+    if (!includeAnchorInSave) {
+      selected = selected.where((element) => element.id != anchor.id).toList();
+    }
+    selected.sort((a, b) => a.startTime.compareTo(b.startTime));
+    await _storage.saveDayRecords(resolution.day, selected);
+    return _OverlapSaveResult(
+      saved: true,
+      corrected: corrected,
+      hadConflict: resolution.hasOverlap,
+      touchedGroupIds: touchedGroups,
+    );
+  }
+
+  int _ensurePositiveSeconds(int raw) {
+    return raw <= 0 ? 1 : raw;
+  }
+
+  bool _isOverlap(ActivityRecord a, ActivityRecord b) {
+    return a.startTime.isBefore(b.endTime) && b.startTime.isBefore(a.endTime);
+  }
+
+  String _recordLabel(ActivityRecord record) {
+    final category = findCategory(record.categoryId);
+    final name = category?.name ?? record.categoryId;
+    final note = record.note.trim();
+    if (note.isEmpty || note == name) {
+      return name;
+    }
+    return '$name · $note';
+  }
+
+  String _formatRange(DateTime start, DateTime end) {
+    final formatter = DateFormat('HH:mm');
+    return '${formatter.format(start)}-${formatter.format(end)}';
+  }
+
+  Future<void> _refreshRecentContextsForGroups(Set<String> groupIds) async {
+    final targets = groupIds
+        .where(
+          (id) => _session.recentContexts.any(
+            (ctx) => ctx.groupId == id,
+          ),
+        )
+        .toSet();
+    if (targets.isEmpty) {
+      return;
+    }
+    final now = DateTime.now();
+    final records = await _storage.loadRangeRecords(
+      now.subtract(const Duration(days: 365)),
+      now,
+    );
+    final updated = <RecentContext>[];
+    for (final ctx in _session.recentContexts) {
+      if (!targets.contains(ctx.groupId)) {
+        updated.add(ctx);
+        continue;
+      }
+      final recalculated = _recalculateRecentContext(ctx.groupId, records);
+      if (recalculated != null) {
+        updated.add(recalculated);
+      }
+    }
+    updated.sort(
+      (a, b) => b.lastActiveTime.compareTo(a.lastActiveTime),
+    );
+    _session = _session.copyWith(
+      recentContexts: updated.take(8).toList(),
+      lastUpdated: DateTime.now().millisecondsSinceEpoch,
+    );
+    await _storage.writeSession(_session);
+    notifyListeners();
+  }
+
+  RecentContext? _recalculateRecentContext(
+    String groupId,
+    List<ActivityRecord> allRecords,
+  ) {
+    final related = allRecords
+        .where((record) => record.groupId == groupId)
+        .toList()
+      ..sort((a, b) => b.endTime.compareTo(a.endTime));
+    if (related.isEmpty) {
+      return null;
+    }
+    final latest = related.first;
+    final totalSeconds = related.fold<int>(
+      0,
+      (prev, e) => prev + e.durationSeconds,
+    );
+    final resolvedNote = _resolveNote(latest.categoryId, latest.note);
+    return RecentContext(
+      groupId: latest.groupId,
+      categoryId: latest.categoryId,
+      note: resolvedNote,
+      lastActiveTime: latest.endTime,
+      accumulatedSeconds: totalSeconds,
+    );
   }
 
   @override

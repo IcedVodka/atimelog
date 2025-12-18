@@ -8,6 +8,7 @@ import '../../core/utils/time_formatter.dart';
 import '../../models/sync_models.dart';
 import '../../models/time_models.dart';
 import '../../services/time_tracking_controller.dart';
+import '../../widgets/overlap_fix_dialog.dart';
 
 class ActivityTab extends StatefulWidget {
   const ActivityTab({
@@ -72,7 +73,13 @@ class ActivityTabState extends State<ActivityTab>
 
   Future<void> _handlePause() async {
     try {
-      await widget.controller.stopCurrentActivity(pushToRecent: true);
+      final record = await widget.controller.stopCurrentActivity(
+        pushToRecent: true,
+        onConflict: _handleOverlapConflict,
+      );
+      if (record == null) {
+        _showSnack('已取消暂停操作');
+      }
     } catch (error) {
       _showSnack(error.toString());
     }
@@ -80,7 +87,13 @@ class ActivityTabState extends State<ActivityTab>
 
   Future<void> _handleStop() async {
     try {
-      await widget.controller.stopCurrentActivity(pushToRecent: false);
+      final record = await widget.controller.stopCurrentActivity(
+        pushToRecent: false,
+        onConflict: _handleOverlapConflict,
+      );
+      if (record == null) {
+        _showSnack('已取消结束操作');
+      }
     } catch (error) {
       _showSnack(error.toString());
     }
@@ -110,7 +123,17 @@ class ActivityTabState extends State<ActivityTab>
       picked.hour,
       picked.minute,
     );
-    await widget.controller.updateCurrentStartTime(updatedStart);
+    try {
+      final success = await widget.controller.updateCurrentStartTime(
+        updatedStart,
+        onConflict: _handleOverlapConflict,
+      );
+      if (!success) {
+        _showSnack('已取消修改开始时间');
+      }
+    } catch (error) {
+      _showSnack(error.toString());
+    }
   }
 
   void _debounceCurrentNoteSave(CurrentActivity current) {
@@ -311,13 +334,17 @@ class ActivityTabState extends State<ActivityTab>
     final resolvedNote = noteController.text.trim().isEmpty
         ? (category?.name ?? '其他.${contextItem.categoryId}')
         : noteController.text.trim();
-    await widget.controller.updateRecordWithSync(
+    final saved = await widget.controller.updateRecordWithSync(
       record: latest,
       newStart: newStart,
       newEnd: newEnd,
       note: resolvedNote,
       syncGroupNotes: true,
+      onConflict: _handleOverlapConflict,
     );
+    if (!saved) {
+      return;
+    }
     await widget.controller.updateRecentNote(contextItem.groupId, resolvedNote);
     setState(() {});
     _showSnack('已更新最近活动');
@@ -530,14 +557,19 @@ class ActivityTabState extends State<ActivityTab>
       return;
     }
     try {
-      await widget.controller.manualAddRecord(
+      final record = await widget.controller.manualAddRecord(
         categoryId: cat.id,
         note: noteController.text.trim().isEmpty
             ? cat.name
             : noteController.text.trim(),
         startTime: startDateTime,
         endTime: endDateTime,
+        onConflict: _handleOverlapConflict,
       );
+      if (record == null) {
+        _showSnack('已取消补录');
+        return;
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -554,6 +586,12 @@ class ActivityTabState extends State<ActivityTab>
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<OverlapUserDecision> _handleOverlapConflict(
+    OverlapResolution resolution,
+  ) {
+    return showOverlapFixDialog(context, resolution);
   }
 
   void _updateSyncAnimation(bool syncing) {

@@ -10,7 +10,11 @@ import 'package:path_provider/path_provider.dart';
 import '../models/sync_models.dart';
 import '../models/time_models.dart';
 
-typedef _CategoryConfig = ({List<CategoryModel> categories, bool darkMode});
+typedef _CategoryConfig = ({
+  List<CategoryModel> categories,
+  bool darkMode,
+  OverlapFixMode overlapFixMode,
+});
 
 /// 负责所有本地 JSON 文件读写逻辑。
 class TimeStorageService {
@@ -115,6 +119,7 @@ class TimeStorageService {
     final file = await _currentSessionFile();
     final payload = session.toJson();
     await file.writeAsString(prettyJson(payload));
+    await _invalidateEtag('current/${p.basename(file.path)}');
   }
 
   Future<File> _dayFile(DateTime date) async {
@@ -132,6 +137,8 @@ class TimeStorageService {
   Future<void> appendActivity(ActivityRecord record) async {
     final file = await _dayFile(record.startTime);
     final day = DateFormat('yyyy-MM-dd').format(record.startTime);
+    final month = DateFormat('yyyyMM').format(record.startTime);
+    final relativePath = p.posix.join('data', month, '$day.json');
     Map<String, dynamic> jsonMap;
     if (await file.exists()) {
       final content = await file.readAsString();
@@ -149,6 +156,7 @@ class TimeStorageService {
     jsonMap['lastUpdated'] = DateTime.now().millisecondsSinceEpoch;
 
     await file.writeAsString(prettyJson(jsonMap));
+    await _invalidateEtag(relativePath);
   }
 
   Future<List<ActivityRecord>> loadDayRecords(DateTime date) async {
@@ -176,12 +184,17 @@ class TimeStorageService {
   }) async {
     final file = await _dayFile(date);
     final day = DateFormat('yyyy-MM-dd').format(date);
+    final month = DateFormat('yyyyMM').format(date);
+    final relativePath = p.posix.join('data', month, '$day.json');
+    final sorted = [...records]
+      ..sort((a, b) => a.startTime.compareTo(b.startTime));
     final payload = {
       'date': day,
       'lastUpdated': lastUpdated ?? DateTime.now().millisecondsSinceEpoch,
-      'activities': records.map((e) => e.toJson()).toList(),
+      'activities': sorted.map((e) => e.toJson()).toList(),
     };
     await file.writeAsString(prettyJson(payload));
+    await _invalidateEtag(relativePath);
   }
 
   Future<void> updateRecord({
@@ -277,6 +290,7 @@ class TimeStorageService {
     final rawItems = mapContent?['items'] as List<dynamic>? ?? <dynamic>[];
     bool? darkMode = mapContent?['darkMode'] as bool?;
     darkMode ??= await _loadLegacyDarkMode();
+    final overlapRaw = mapContent?['overlapFixMode'] as String?;
 
     var categories = rawItems
         .map((e) => CategoryModel.fromJson(e as Map<String, dynamic>))
@@ -285,22 +299,30 @@ class TimeStorageService {
     if (categories.isEmpty && ensureDefaults) {
       categories = _defaultCategories().map(_normalizeCategory).toList();
       final resolvedDark = darkMode ?? false;
+      final resolvedOverlap = parseOverlapFixMode(overlapRaw);
       await _writeCategoryConfig(
         categories: categories,
         darkMode: resolvedDark,
+        overlapFixMode: resolvedOverlap,
       );
-      return (categories: categories, darkMode: resolvedDark);
+      return (
+        categories: categories,
+        darkMode: resolvedDark,
+        overlapFixMode: resolvedOverlap,
+      );
     }
     categories.sort((a, b) => a.order.compareTo(b.order));
     return (
       categories: categories,
       darkMode: darkMode ?? false,
+      overlapFixMode: parseOverlapFixMode(overlapRaw),
     );
   }
 
   Future<void> _writeCategoryConfig({
     required List<CategoryModel> categories,
     required bool darkMode,
+    required OverlapFixMode overlapFixMode,
   }) async {
     final file = await _categoriesFile();
     final normalized = categories.map(_normalizeCategory).toList()
@@ -309,9 +331,11 @@ class TimeStorageService {
       prettyJson({
         'lastUpdated': DateTime.now().millisecondsSinceEpoch,
         'darkMode': darkMode,
+        'overlapFixMode': overlapFixMode.name,
         'items': normalized.map((e) => e.toJson()).toList(),
       }),
     );
+    await _invalidateEtag('current/${p.basename(file.path)}');
   }
 
   Future<List<CategoryModel>> loadCategories() async {
@@ -321,6 +345,7 @@ class TimeStorageService {
       await _writeCategoryConfig(
         categories: defaults,
         darkMode: config.darkMode,
+        overlapFixMode: config.overlapFixMode,
       );
       return defaults;
     }
@@ -333,6 +358,7 @@ class TimeStorageService {
     await _writeCategoryConfig(
       categories: normalized,
       darkMode: config.darkMode,
+      overlapFixMode: config.overlapFixMode,
     );
   }
 
@@ -342,9 +368,13 @@ class TimeStorageService {
       await _writeCategoryConfig(
         categories: _defaultCategories().map(_normalizeCategory).toList(),
         darkMode: config.darkMode,
+        overlapFixMode: config.overlapFixMode,
       );
     }
-    return AppSettings(darkMode: config.darkMode);
+    return AppSettings(
+      darkMode: config.darkMode,
+      overlapFixMode: config.overlapFixMode,
+    );
   }
 
   Future<void> saveSettings(AppSettings settings) async {
@@ -355,6 +385,7 @@ class TimeStorageService {
     await _writeCategoryConfig(
       categories: categories,
       darkMode: settings.darkMode,
+      overlapFixMode: settings.overlapFixMode,
     );
   }
 
@@ -388,6 +419,7 @@ class TimeStorageService {
     await file.parent.create(recursive: true);
     const encoder = JsonEncoder.withIndent('  ');
     await file.writeAsString(encoder.convert(config.toJson()));
+    await _invalidateEtag('current/${p.basename(file.path)}');
   }
 
   Future<File> resolveRelativeFile(String relativePath) async {
@@ -543,6 +575,26 @@ class TimeStorageService {
       result[entry.key] = entry.value;
     }
     return result;
+  }
+
+  Future<void> _invalidateEtag(String relativePath) async {
+    final normalized = p.posix.normalize(relativePath.replaceAll('\\', '/'));
+    if (normalized.startsWith('data/')) {
+      final parts = normalized.split('/');
+      if (parts.length >= 3) {
+        final month = parts[1];
+        final fileName = parts.sublist(2).join('/');
+        final etags = await loadMonthEtags(month);
+        etags.remove('$month/$fileName');
+        await saveMonthEtags(month, etags);
+      }
+      return;
+    }
+    if (normalized.startsWith('current/')) {
+      final etags = await loadCurrentEtags();
+      etags.remove(normalized);
+      await saveCurrentEtags(etags);
+    }
   }
 
   Future<Map<String, String>> loadCurrentEtags() async {
