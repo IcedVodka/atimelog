@@ -606,91 +606,97 @@ class ActivityTabState extends State<ActivityTab>
   }
 
   Future<void> _showSyncDialog() async {
-    final status = widget.controller.syncStatus;
-    final config = widget.controller.syncConfig;
-    final theme = Theme.of(context);
-    final isReady = config.isConfigured;
-    final detail = _syncDetailText(status, isReady);
-    final counterText = _syncCounterText(status);
-    final lastTime = status.lastSyncTime != null
-        ? DateFormat('MM-dd HH:mm:ss').format(status.lastSyncTime!)
-        : '暂无';
-    Color titleColor;
-    String statusLabel;
-    if (!isReady) {
-      titleColor = theme.colorScheme.error;
-      statusLabel = '未配置 WebDAV';
-    } else if (status.syncing) {
-      titleColor = theme.colorScheme.primary;
-      statusLabel = '同步中...';
-    } else if (status.lastSyncSucceeded == true) {
-      titleColor = Colors.green.shade600;
-      statusLabel = '上次同步成功';
-    } else if (status.lastSyncSucceeded == false) {
-      titleColor = theme.colorScheme.error;
-      statusLabel = '上次同步失败';
-    } else {
-      titleColor = theme.colorScheme.onSurfaceVariant;
-      statusLabel = '尚未同步';
-    }
-
     await showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.sync, color: titleColor),
-            const SizedBox(width: 8),
-            const Text('同步'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              statusLabel,
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                color: titleColor,
+      builder: (context) {
+        return AnimatedBuilder(
+          animation: widget.controller,
+          builder: (context, _) {
+            final status = widget.controller.syncStatus;
+            final config = widget.controller.syncConfig;
+            final theme = Theme.of(context);
+            final isReady = config.isConfigured;
+            final detail = _syncDetailText(status, isReady);
+            final counterText = _syncCounterText(status);
+            final lastTime = status.lastSyncTime != null
+                ? DateFormat('MM-dd HH:mm:ss').format(status.lastSyncTime!)
+                : '暂无';
+            Color titleColor;
+            String statusLabel;
+            if (!isReady) {
+              titleColor = theme.colorScheme.error;
+              statusLabel = '未配置 WebDAV';
+            } else if (status.syncing) {
+              titleColor = theme.colorScheme.primary;
+              statusLabel = '同步中...';
+            } else if (status.lastSyncSucceeded == true) {
+              titleColor = Colors.green.shade600;
+              statusLabel = '上次同步成功';
+            } else if (status.lastSyncSucceeded == false) {
+              titleColor = theme.colorScheme.error;
+              statusLabel = '上次同步失败';
+            } else {
+              titleColor = theme.colorScheme.onSurfaceVariant;
+              statusLabel = '尚未同步';
+            }
+
+            return AlertDialog(
+              title: Row(
+                children: [
+                  Icon(Icons.sync, color: titleColor),
+                  const SizedBox(width: 8),
+                  const Text('同步'),
+                ],
               ),
-            ),
-            const SizedBox(height: 8),
-            Text('最近：$lastTime'),
-            const SizedBox(height: 6),
-            Text(detail),
-            if (counterText.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(counterText),
-            ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('关闭'),
-          ),
-          FilledButton.icon(
-            onPressed: status.syncing || !isReady
-                ? null
-                : () async {
-                    Navigator.pop(context);
-                    await widget.controller.syncNow(
-                      manual: true,
-                      reason: '手动同步',
-                    );
-                  },
-            icon: status.syncing
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.sync),
-            label: Text(status.syncing ? '同步中' : '手动同步'),
-          ),
-        ],
-      ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    statusLabel,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: titleColor,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text('最近：$lastTime'),
+                  const SizedBox(height: 6),
+                  Text(detail),
+                  if (counterText.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(counterText),
+                  ],
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('关闭'),
+                ),
+                FilledButton.icon(
+                  onPressed: status.syncing || !isReady
+                      ? null
+                      : () async {
+                          await widget.controller.syncNow(
+                            manual: true,
+                            reason: '手动同步',
+                          );
+                        },
+                  icon: status.syncing
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.sync),
+                  label: Text(status.syncing ? '同步中' : '手动同步'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -721,6 +727,9 @@ class ActivityTabState extends State<ActivityTab>
             .toList();
         if (_selectedCategoryId == null && categories.isNotEmpty) {
           _selectedCategoryId = categories.first.id;
+        } else if (_selectedCategoryId != null &&
+            categories.every((c) => c.id != _selectedCategoryId)) {
+          _selectedCategoryId = categories.isNotEmpty ? categories.first.id : null;
         }
         final activity = widget.controller.currentActivity;
         final recents = widget.controller.recentContexts;
@@ -734,7 +743,7 @@ class ActivityTabState extends State<ActivityTab>
                 primary: false,
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
                 children: [
-                  _buildActiveCard(activity),
+                  _buildActiveCard(activity, categories),
                   const SizedBox(height: 12),
                   _buildRecents(recents),
                   const SizedBox(height: 12),
@@ -753,10 +762,16 @@ class ActivityTabState extends State<ActivityTab>
     );
   }
 
-  Widget _buildActiveCard(CurrentActivity? current) {
+  Widget _buildActiveCard(
+    CurrentActivity? current,
+    List<CategoryModel> categories,
+  ) {
     if (current == null) {
       _lastCurrentTempId = null;
       widget.noteController.text = '';
+      final hasCategories = categories.isNotEmpty;
+      final selectedId =
+          hasCategories ? (_selectedCategoryId ?? categories.first.id) : null;
       return Card(
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -764,16 +779,77 @@ class ActivityTabState extends State<ActivityTab>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('尚未开始', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 8),
-              Text(
-                '点击下方分类开始新任务，记录内容默认使用分类名称，可在开始后修改。',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: _startFromSelected,
-                icon: const Icon(Icons.play_arrow_rounded),
-                label: const Text('开始计时'),
+              const SizedBox(height: 16),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final isNarrow = constraints.maxWidth < 360;
+                  final dropdown = InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: '选择分类',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        isExpanded: true,
+                        value: selectedId,
+                        hint: const Text('暂无可用分类'),
+                        onChanged: hasCategories
+                            ? (value) =>
+                                setState(() => _selectedCategoryId = value)
+                            : null,
+                        items: categories
+                            .map(
+                              (cat) => DropdownMenuItem(
+                                value: cat.id,
+                                child: Row(
+                                  children: [
+                                    Icon(cat.iconData, color: cat.color),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        cat.name,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+                  );
+                  final startButton = ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 48, minWidth: 140),
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        shape: const StadiumBorder(),
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                      ),
+                      onPressed: hasCategories ? _startFromSelected : null,
+                      icon: const Icon(Icons.play_arrow_rounded),
+                      label: const Text('开始计时'),
+                    ),
+                  );
+                  if (isNarrow) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        dropdown,
+                        const SizedBox(height: 12),
+                        startButton,
+                      ],
+                    );
+                  }
+                  return Row(
+                    children: [
+                      Expanded(child: dropdown),
+                      const SizedBox(width: 12),
+                      startButton,
+                    ],
+                  );
+                },
               ),
             ],
           ),

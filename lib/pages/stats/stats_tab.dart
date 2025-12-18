@@ -43,43 +43,65 @@ class _StatsTabState extends State<StatsTab>
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final tabBarWidth = math.max(constraints.maxWidth * 0.6, 200.0);
+                  final toggleWidth = math.max(tabBarWidth / 4, 80.0);
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
                     child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                       decoration: BoxDecoration(
                         color: Theme.of(
                           context,
                         ).colorScheme.surfaceVariant.withOpacity(0.6),
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(14),
                       ),
-                      child: const TabBar(
-                        tabs: [
-                          Tab(icon: Icon(Icons.timeline), text: '时间线'),
-                          Tab(icon: Icon(Icons.pie_chart), text: '饼图'),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: tabBarWidth,
+                            child: const TabBar(
+                              tabs: [
+                                Tab(icon: Icon(Icons.timeline), text: '时间线'),
+                                Tab(icon: Icon(Icons.pie_chart), text: '饼图'),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: toggleWidth,
+                                child: _mergeToggle(
+                                  label: '事件',
+                                  value: _mergePause,
+                                  onChanged: (val) =>
+                                      setState(() => _mergePause = val),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: toggleWidth,
+                                child: _mergeToggle(
+                                  label: '群组',
+                                  value: _groupMerge,
+                                  onChanged: (val) =>
+                                      setState(() => _groupMerge = val),
+                                ),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      _mergeToggle(
-                        label: '合并片段',
-                        value: _mergePause,
-                        onChanged: (val) => setState(() => _mergePause = val),
-                      ),
-                      const SizedBox(height: 6),
-                      _mergeToggle(
-                        label: '合并群组',
-                        value: _groupMerge,
-                        onChanged: (val) => setState(() => _groupMerge = val),
-                      ),
-                    ],
-                  ),
-                ],
+                  );
+                },
               ),
             ),
             Expanded(
@@ -97,24 +119,23 @@ class _StatsTabState extends State<StatsTab>
     required ValueChanged<bool> onChanged,
   }) {
     final theme = Theme.of(context);
-    return InkWell(
-      borderRadius: BorderRadius.circular(10),
-      onTap: () => onChanged(!value),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              value ? Icons.check_circle : Icons.radio_button_unchecked,
-              size: 18,
-              color: value
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.outline,
-            ),
-            const SizedBox(width: 6),
-            Text(label),
-          ],
+    return FilledButton.tonal(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size.fromHeight(40),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        backgroundColor: value
+            ? theme.colorScheme.primary.withOpacity(0.14)
+            : theme.colorScheme.surfaceVariant.withOpacity(0.45),
+        foregroundColor:
+            value ? theme.colorScheme.primary : theme.colorScheme.onSurface,
+        elevation: 0,
+      ),
+      onPressed: () => onChanged(!value),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          label,
+          style: const TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
     );
@@ -142,83 +163,127 @@ class _StatsTabState extends State<StatsTab>
       ),
     );
 
-    final searchField = TextField(
-      decoration: const InputDecoration(
-        labelText: '搜索记录内容 / 分类',
-        prefixIcon: Icon(Icons.search),
+    final searchField = SizedBox(
+      height: 42,
+      child: TextField(
+        decoration: InputDecoration(
+          prefixIcon: const Icon(Icons.search),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        ),
+        onChanged: (value) => setState(() => _timelineKeyword = value),
       ),
-      onChanged: (value) => setState(() => _timelineKeyword = value),
     );
 
     Widget rangeDisplay() {
+      final theme = Theme.of(context);
+      final borderColor = theme.colorScheme.outline.withOpacity(0.4);
+      final boxDecoration = BoxDecoration(
+        color: theme.colorScheme.surfaceVariant.withOpacity(0.45),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor),
+      );
       if (_timelineMode == TimelineRangeMode.day) {
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              onPressed: () => setState(
-                () => _timelineDate = _timelineDate.subtract(
-                  const Duration(days: 1),
+        final today = DateTime.now();
+        final todayDate = DateTime(today.year, today.month, today.day);
+        final currentDate = DateTime(
+          _timelineDate.year,
+          _timelineDate.month,
+          _timelineDate.day,
+        );
+        final canForward = currentDate.isBefore(todayDate);
+        return Container(
+          decoration: boxDecoration,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints:
+                    const BoxConstraints.tightFor(width: 38, height: 38),
+                onPressed: () => setState(
+                  () => _timelineDate = _timelineDate.subtract(
+                    const Duration(days: 1),
+                  ),
+                ),
+                icon: const Icon(Icons.chevron_left),
+              ),
+              TextButton(
+                onPressed: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _timelineDate,
+                    firstDate: DateTime.now().subtract(
+                      const Duration(days: 365),
+                    ),
+                    lastDate: DateTime.now(),
+                  );
+                  if (picked != null) {
+                    setState(() => _timelineDate = picked);
+                  }
+                },
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                ),
+                child: Text(
+                  DateFormat('yyyy-MM-dd').format(_timelineDate),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
-              icon: const Icon(Icons.chevron_left),
-            ),
-            TextButton(
-              onPressed: () async {
-                final picked = await showDatePicker(
-                  context: context,
-                  initialDate: _timelineDate,
-                  firstDate: DateTime.now().subtract(
-                    const Duration(days: 365),
-                  ),
-                  lastDate: DateTime.now(),
-                );
-                if (picked != null) {
-                  setState(() => _timelineDate = picked);
-                }
-              },
-              child: Text(DateFormat('yyyy-MM-dd').format(_timelineDate)),
-            ),
-            IconButton(
-              onPressed: _timelineDate.isBefore(DateTime.now())
-                  ? () => setState(
-                        () => _timelineDate = _timelineDate.add(
-                          const Duration(days: 1),
-                        ),
-                      )
-                  : null,
-              icon: const Icon(Icons.chevron_right),
-            ),
-          ],
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints:
+                    const BoxConstraints.tightFor(width: 38, height: 38),
+                onPressed: canForward
+                    ? () => setState(
+                          () => _timelineDate = _timelineDate.add(
+                            const Duration(days: 1),
+                          ),
+                        )
+                    : null,
+                icon: const Icon(Icons.chevron_right),
+              ),
+            ],
+          ),
         );
       }
       if (_timelineMode == TimelineRangeMode.custom) {
         final custom = _currentCustomRange();
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            _rangeValue(
-              custom.start,
-              onTap: () => _pickCustomStart(custom),
-            ),
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 2),
-              child: Icon(Icons.remove, size: 14),
-            ),
-            _rangeValue(
-              custom.end,
-              onTap: () => _pickCustomEnd(custom),
-            ),
-          ],
+        return Container(
+          decoration: boxDecoration,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _rangeValue(
+                custom.start,
+                label: '起',
+                onTap: () => _pickCustomStart(custom),
+              ),
+              const SizedBox(height: 4),
+              _rangeValue(
+                custom.end,
+                label: '止',
+                onTap: () => _pickCustomEnd(custom),
+              ),
+            ],
+          ),
         );
       }
-      return Text(
-        '近24小时',
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
+      return Container(
+        decoration: boxDecoration,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Text(
+          '近24小时',
+          style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+        ),
       );
     }
 
@@ -235,13 +300,17 @@ class _StatsTabState extends State<StatsTab>
                   modeChips,
                   const SizedBox(height: 10),
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Expanded(child: searchField),
+                      Expanded(
+                        flex: 1,
+                        child: searchField,
+                      ),
                       const SizedBox(width: 12),
-                      Flexible(
+                      Expanded(
+                        flex: 3,
                         child: Align(
-                          alignment: Alignment.topRight,
+                          alignment: Alignment.centerRight,
                           child: rangeDisplay(),
                         ),
                       ),
@@ -278,15 +347,31 @@ class _StatsTabState extends State<StatsTab>
         );
   }
 
-  Widget _rangeValue(DateTime time, {required VoidCallback onTap}) {
+  Widget _rangeValue(
+    DateTime time, {
+    String? label,
+    required VoidCallback onTap,
+  }) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Text(
-          DateFormat('MM-dd HH:mm').format(time),
-          style: const TextStyle(fontWeight: FontWeight.w700),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (label != null) ...[
+              Text(
+                '$label：',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(width: 2),
+            ],
+            Text(
+              DateFormat('MM-dd HH:mm').format(time),
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ],
         ),
       ),
     );

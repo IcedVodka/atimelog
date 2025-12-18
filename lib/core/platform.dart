@@ -12,9 +12,9 @@ String? trayIconPath() {
   if (!isDesktop) {
     return null;
   }
+  final exeDir = File(Platform.resolvedExecutable).parent;
   if (Platform.isWindows) {
-    final exeDir = File(Platform.resolvedExecutable).parent;
-    final candidates = [
+    final winCandidates = [
       p.join(
         exeDir.path,
         'data',
@@ -31,11 +31,52 @@ String? trayIconPath() {
       ),
       p.join(Directory.current.path, 'assets', 'clock.ico'),
     ];
-    for (final path in candidates) {
+    for (final path in winCandidates) {
       if (File(path).existsSync()) {
         return path;
       }
     }
+    return 'assets/clock.ico';
   }
-  return Platform.isWindows ? 'assets/clock.ico' : 'assets/clock.png';
+
+  final unixCandidates = <String>[
+    p.join(
+      exeDir.path,
+      'data',
+      'flutter_assets',
+      'assets',
+      'clock.png',
+    ),
+    p.join(
+      Directory.current.path,
+      'data',
+      'flutter_assets',
+      'assets',
+      'clock.png',
+    ),
+    p.join(Directory.current.path, 'assets', 'clock.png'),
+  ];
+  if (Platform.isMacOS) {
+    unixCandidates.insert(
+      1,
+      p.normalize(
+        p.join(
+          exeDir.path,
+          '..',
+          'Frameworks',
+          'App.framework',
+          'Resources',
+          'flutter_assets',
+          'assets',
+          'clock.png',
+        ),
+      ),
+    );
+  }
+  for (final path in unixCandidates) {
+    if (File(path).existsSync()) {
+      return path;
+    }
+  }
+  return 'assets/clock.png';
 }

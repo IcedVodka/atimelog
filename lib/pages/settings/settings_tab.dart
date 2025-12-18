@@ -176,26 +176,37 @@ class _SettingsTabState extends State<SettingsTab> {
               children: [
                 const Icon(Icons.cloud_outlined),
                 const SizedBox(width: 8),
-                Text(
-                  'WebDAV 同步',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                Expanded(
+                  child: Text(
+                    'WebDAV 同步',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const Spacer(),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    statusLabel,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: status.lastSyncSucceeded == false
-                          ? theme.colorScheme.error
-                          : theme.colorScheme.onSurface,
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Container(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceVariant,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          statusLabel,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: status.lastSyncSucceeded == false
+                                ? theme.colorScheme.error
+                                : theme.colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -447,7 +458,7 @@ class _SettingsTabState extends State<SettingsTab> {
                 child: ListTile(
                   leading: const Icon(Icons.info_outline),
                   title: const Text('关于'),
-                  subtitle: const Text('AtimeLog Phase 2 Demo'),
+                  subtitle: const Text('AtimeLog'),
                 ),
               ),
             ],
