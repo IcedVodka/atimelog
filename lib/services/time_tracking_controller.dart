@@ -724,6 +724,21 @@ class TimeTrackingController extends ChangeNotifier {
     }
   }
 
+  Future<void> _reloadStateFromStorage({bool notify = true}) async {
+    _session = await _storage.loadSession();
+    _categories = await _storage.loadCategories();
+    _settings = await _storage.loadSettings();
+    if (_session.current != null) {
+      _startTicker();
+      await _checkMidnightSplit();
+    } else {
+      _stopTicker();
+    }
+    if (notify) {
+      notifyListeners();
+    }
+  }
+
   Future<void> syncNow({bool manual = false, String? reason}) async {
     if (_syncStatus.syncing) {
       return;
@@ -775,6 +790,9 @@ class TimeTrackingController extends ChangeNotifier {
       lastDownloadCount: result.downloaded,
       clearProgress: true,
     );
+    if (result.downloaded > 0) {
+      await _reloadStateFromStorage(notify: false);
+    }
     notifyListeners();
   }
 
