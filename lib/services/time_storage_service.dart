@@ -16,6 +16,8 @@ typedef _CategoryConfig = ({
   OverlapFixMode overlapFixMode,
 });
 
+const int _bootstrapLastUpdated = 0;
+
 /// 负责所有本地 JSON 文件读写逻辑。
 class TimeStorageService {
   TimeStorageService({this.deviceId = 'demo-device'});
@@ -273,9 +275,10 @@ class TimeStorageService {
     bool ensureDefaults = true,
   }) async {
     final file = await _categoriesFile();
+    final fileExists = await file.exists();
     Map<String, dynamic>? mapContent;
 
-    if (await file.exists()) {
+    if (fileExists) {
       final content = await file.readAsString();
       if (content.trim().isNotEmpty) {
         final decoded = jsonDecode(content);
@@ -291,6 +294,8 @@ class TimeStorageService {
     bool? darkMode = mapContent?['darkMode'] as bool?;
     darkMode ??= await _loadLegacyDarkMode();
     final overlapRaw = mapContent?['overlapFixMode'] as String?;
+    final shouldUseBootstrapLastUpdated =
+        !fileExists || mapContent == null || rawItems.isEmpty;
 
     var categories = rawItems
         .map((e) => CategoryModel.fromJson(e as Map<String, dynamic>))
@@ -304,6 +309,9 @@ class TimeStorageService {
         categories: categories,
         darkMode: resolvedDark,
         overlapFixMode: resolvedOverlap,
+        lastUpdated: shouldUseBootstrapLastUpdated
+            ? _bootstrapLastUpdated
+            : null,
       );
       return (
         categories: categories,
@@ -323,13 +331,14 @@ class TimeStorageService {
     required List<CategoryModel> categories,
     required bool darkMode,
     required OverlapFixMode overlapFixMode,
+    int? lastUpdated,
   }) async {
     final file = await _categoriesFile();
     final normalized = categories.map(_normalizeCategory).toList()
       ..sort((a, b) => a.order.compareTo(b.order));
     await file.writeAsString(
       prettyJson({
-        'lastUpdated': DateTime.now().millisecondsSinceEpoch,
+        'lastUpdated': lastUpdated ?? DateTime.now().millisecondsSinceEpoch,
         'darkMode': darkMode,
         'overlapFixMode': overlapFixMode.name,
         'items': normalized.map((e) => e.toJson()).toList(),
@@ -346,6 +355,7 @@ class TimeStorageService {
         categories: defaults,
         darkMode: config.darkMode,
         overlapFixMode: config.overlapFixMode,
+        lastUpdated: _bootstrapLastUpdated,
       );
       return defaults;
     }
@@ -369,6 +379,7 @@ class TimeStorageService {
         categories: _defaultCategories().map(_normalizeCategory).toList(),
         darkMode: config.darkMode,
         overlapFixMode: config.overlapFixMode,
+        lastUpdated: _bootstrapLastUpdated,
       );
     }
     return AppSettings(

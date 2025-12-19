@@ -145,10 +145,11 @@ class CurrentSession {
   }
 
   static CurrentSession empty({required String deviceId}) {
-    final now = DateTime.now().millisecondsSinceEpoch;
+    // 使用足够早的时间戳，避免新设备首次同步时覆盖云端。
+    const bootstrapLastUpdated = 0;
     return CurrentSession(
       deviceId: deviceId,
-      lastUpdated: now,
+      lastUpdated: bootstrapLastUpdated,
       current: null,
       recentContexts: const [],
     );

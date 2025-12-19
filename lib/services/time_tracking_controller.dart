@@ -790,7 +790,7 @@ class TimeTrackingController extends ChangeNotifier {
       lastDownloadCount: result.downloaded,
       clearProgress: true,
     );
-    if (result.downloaded > 0) {
+    if (result.success || result.downloaded > 0) {
       await _reloadStateFromStorage(notify: false);
     }
     notifyListeners();
